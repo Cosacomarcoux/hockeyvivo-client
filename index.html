@@ -3348,6 +3348,7 @@ function showResult() {
 //  SAVE RESULT TO SUPABASE (Fase B)
 // ============================================================
 async function saveResultToSupabase() {
+  console.log('saveResultToSupabase llamada. currentUser:', currentUser, 'finalScore:', finalScore);
   // Only save if user is logged in and we have a profile
   if (!supabaseClient || !currentUser) {
     console.log('No hay sesión — no se guarda en la nube');
@@ -3451,6 +3452,7 @@ async function updateRankingPublico() {
 }
 
 async function submitResult() {
+  console.log('submitResult ejecutada');
   // Save to Supabase (cloud) — this is the real persistence now
   const saved = await saveResultToSupabase();
 
