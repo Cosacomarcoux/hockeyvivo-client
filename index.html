@@ -1666,6 +1666,12 @@
       </div>
     </div>
 
+    <!-- Nivel y progreso -->
+    <div id="perfil-nivel-bloque" style="
+      background: rgba(255,255,255,0.04); border: 1px solid rgba(230,57,70,0.2);
+      border-radius: 14px; padding: 18px 16px; margin-bottom: 16px;
+    "></div>
+
     <!-- Info detallada -->
     <div style="
       background: rgba(255,255,255,0.04); border: 1px solid rgba(230,57,70,0.15);
@@ -2111,8 +2117,53 @@ async function loadRankingFromSupabase() {
 function goToPerfil() {
   loadProfileData();
   loadPlayerStats();
+  mostrarNivelEnPerfil();
   goTo('screen-perfil');
   updateNav('perfil');
+}
+
+async function mostrarNivelEnPerfil() {
+  const bloque = document.getElementById('perfil-nivel-bloque');
+  if (!bloque) return;
+  if (!supabaseClient || !currentUser) {
+    bloque.innerHTML = '';
+    return;
+  }
+
+  const { data: jug } = await supabaseClient
+    .from('jugadoras')
+    .select('nivel, subnivel, repeticiones_umbral')
+    .eq('id', currentUser.id)
+    .maybeSingle();
+
+  const nivel      = (jug && jug.nivel)      ? jug.nivel      : (currentProfile && currentProfile.nivel) || 'INICIADO';
+  const subnivel   = (jug && jug.subnivel)   ? jug.subnivel   : 1;
+  const repsActual = (jug && jug.repeticiones_umbral != null) ? jug.repeticiones_umbral : 0;
+  const cfg        = NIVELES_CONFIG[nivel] || NIVELES_CONFIG['INICIADO'];
+  const repsMax    = cfg.repsNecesarias < 999 ? cfg.repsNecesarias : null;
+
+  const pctSubnivel = Math.round((subnivel / 5) * 100);
+  const pctReps     = repsMax ? Math.min(Math.round((repsActual / repsMax) * 100), 100) : 0;
+
+  bloque.innerHTML = `
+    <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; letter-spacing:2px; color:#E63946; font-weight:700; margin-bottom:12px;">NIVEL ACTUAL</div>
+    <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:6px;">
+      <span style="font-family:'Bebas Neue',sans-serif; font-size:36px; color:white; line-height:1;">${nivel}</span>
+      <span style="font-family:'Barlow Condensed',sans-serif; font-size:14px; color:rgba(245,245,245,0.55); letter-spacing:1px;">Nivel ${subnivel} de 5</span>
+    </div>
+    <div style="background:rgba(255,255,255,0.08); border-radius:999px; height:8px; overflow:hidden; margin-bottom:16px;">
+      <div style="height:100%; width:${pctSubnivel}%; background:linear-gradient(90deg,#E63946,#FF2D45); border-radius:999px; transition:width 0.6s ease;"></div>
+    </div>
+    ${repsMax ? `
+    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+      <span style="font-family:'Barlow Condensed',sans-serif; font-size:11px; letter-spacing:1px; color:rgba(245,245,245,0.45);">REPS HACIA PRÓXIMO NIVEL</span>
+      <span style="font-family:'Barlow Condensed',sans-serif; font-size:12px; color:rgba(245,245,245,0.7); font-weight:600;">${repsActual} / ${repsMax}</span>
+    </div>
+    <div style="background:rgba(255,255,255,0.06); border-radius:999px; height:5px; overflow:hidden;">
+      <div style="height:100%; width:${pctReps}%; background:#E63946; border-radius:999px; transition:width 0.6s ease;"></div>
+    </div>` : `
+    <div style="font-family:'Barlow Condensed',sans-serif; font-size:12px; color:rgba(245,245,245,0.4); letter-spacing:1px; text-align:center; padding-top:4px;">NIVEL MÁXIMO</div>`}
+  `;
 }
 
 async function loadPlayerStats() {
