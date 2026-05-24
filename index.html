@@ -3435,7 +3435,7 @@ async function updateRankingPublico() {
     .from('ranking_publico')
     .select('mejor_t1_ochos')
     .eq('jugadora_id', currentUser.id)
-    .single();
+    .maybeSingle();
 
   const prevBest = existing ? (existing.mejor_t1_ochos || 0) : 0;
   const newBest = Math.max(prevBest, finalScore);
