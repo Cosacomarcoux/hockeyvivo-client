@@ -2233,7 +2233,8 @@ function loadProfileData() {
 
   // Edad y categoría
   if (currentProfile.fecha_nacimiento) {
-    const birthDate = new Date(currentProfile.fecha_nacimiento);
+    const [bYear, bMonth, bDay] = currentProfile.fecha_nacimiento.split('-').map(Number);
+    const birthDate = new Date(bYear, bMonth - 1, bDay);
     const today = new Date();
     let age = today.getFullYear() - birthDate.getFullYear();
     const m = today.getMonth() - birthDate.getMonth();
@@ -3526,7 +3527,8 @@ async function updateRankingPublico() {
   // Compute age category from birthdate
   let categoria = 'OPN';
   if (currentProfile.fecha_nacimiento) {
-    const bd = new Date(currentProfile.fecha_nacimiento);
+    const [bdYear, bdMonth, bdDay] = currentProfile.fecha_nacimiento.split('-').map(Number);
+    const bd = new Date(bdYear, bdMonth - 1, bdDay);
     const today = new Date();
     let age = today.getFullYear() - bd.getFullYear();
     const m = today.getMonth() - bd.getMonth();
