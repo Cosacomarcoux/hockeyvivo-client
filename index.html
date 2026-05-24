@@ -3460,6 +3460,7 @@ async function saveResultToSupabase() {
     // 3. Update public ranking (only if this is a new best for T1)
     console.log('Paso 3: voy a actualizar ranking');
     await updateRankingPublico();
+    await actualizarNivelJugadora();
 
     console.log('✅ Resultado guardado en Supabase');
     return true;
@@ -3510,6 +3511,85 @@ async function updateRankingPublico() {
       visible: !suspiciousFlag
     });
   console.log('Paso 4 ranking upsert hecho');
+}
+
+// Tabla de niveles: cada nivel tiene 5 subniveles con su rango de ochos
+const NIVELES_CONFIG = {
+  INICIADO:   { orden: 0, subniveles: [0, 4, 8, 12, 16], umbralProximo: 20 },
+  INTERMEDIO: { orden: 1, subniveles: [20, 23, 26, 29, 32], umbralProximo: 35 },
+  AVANZADO:   { orden: 2, subniveles: [35, 38, 41, 44, 47], umbralProximo: 50 },
+  ELITE:      { orden: 3, subniveles: [50, 55, 60, 65, 70], umbralProximo: 999 }
+};
+const NIVELES_ORDEN = ['INICIADO', 'INTERMEDIO', 'AVANZADO', 'ELITE'];
+
+// Calcula el subnivel (1-5) dentro de un nivel, según el mejor puntaje
+function calcularSubnivel(nivel, mejorPuntaje) {
+  const cfg = NIVELES_CONFIG[nivel];
+  if (!cfg) return 1;
+  let sub = 1;
+  for (let i = 0; i < cfg.subniveles.length; i++) {
+    if (mejorPuntaje >= cfg.subniveles[i]) sub = i + 1;
+  }
+  return sub;
+}
+
+// Se llama después de guardar un resultado. Maneja subida de subnivel y de nivel.
+async function actualizarNivelJugadora() {
+  if (!supabaseClient || !currentUser || !currentProfile) return;
+
+  const nivelActual = currentProfile.nivel || 'INICIADO';
+  const cfg = NIVELES_CONFIG[nivelActual];
+  if (!cfg) return;
+
+  // Leer datos actuales de la jugadora
+  const { data: jug } = await supabaseClient
+    .from('jugadoras')
+    .select('nivel, subnivel, repeticiones_umbral')
+    .eq('id', currentUser.id)
+    .maybeSingle();
+
+  let repeticiones = (jug && jug.repeticiones_umbral) ? jug.repeticiones_umbral : 0;
+
+  // Leer mejor puntaje histórico
+  const { data: rk } = await supabaseClient
+    .from('ranking_publico')
+    .select('mejor_t1_ochos')
+    .eq('jugadora_id', currentUser.id)
+    .maybeSingle();
+  const mejorPuntaje = (rk && rk.mejor_t1_ochos) ? rk.mejor_t1_ochos : 0;
+
+  // Subnivel según mejor marca (nunca baja)
+  const nuevoSubnivel = calcularSubnivel(nivelActual, mejorPuntaje);
+
+  // ¿El intento ACTUAL alcanzó el umbral del próximo nivel? -> suma repetición
+  let nuevoNivel = nivelActual;
+  if (finalScore >= cfg.umbralProximo) {
+    repeticiones++;
+    // Si juntó 5 repeticiones, sube de nivel grande
+    if (repeticiones >= 5) {
+      const idx = NIVELES_ORDEN.indexOf(nivelActual);
+      if (idx < NIVELES_ORDEN.length - 1) {
+        nuevoNivel = NIVELES_ORDEN[idx + 1];
+        repeticiones = 0; // reinicia contador en el nuevo nivel
+      }
+    }
+  }
+
+  // Guardar cambios en jugadoras
+  await supabaseClient.from('jugadoras').update({
+    nivel: nuevoNivel,
+    subnivel: nuevoSubnivel,
+    repeticiones_umbral: repeticiones
+  }).eq('id', currentUser.id);
+
+  // Actualizar el perfil local
+  currentProfile.nivel = nuevoNivel;
+  currentProfile.subnivel = nuevoSubnivel;
+
+  // Si subió de nivel, avisar al usuario
+  if (nuevoNivel !== nivelActual) {
+    setTimeout(() => alert('¡Subiste de nivel! Ahora sos ' + nuevoNivel), 500);
+  }
 }
 
 async function submitResult() {
