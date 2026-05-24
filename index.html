@@ -1691,16 +1691,27 @@
       </div>
     </div>
 
-    <!-- Próximamente: progreso -->
-    <div style="
-      background: linear-gradient(135deg, rgba(230,57,70,0.08), rgba(184,35,46,0.04));
-      border: 1px dashed rgba(230,57,70,0.3);
-      border-radius: 14px; padding: 18px 16px; margin-bottom: 16px;
-      text-align: center;
-    ">
-      <div style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:#E63946; letter-spacing:1px;">🚀 PRÓXIMAMENTE</div>
-      <div style="font-family:'Barlow Condensed',sans-serif; font-size:12px; color:rgba(245,245,245,0.6); margin-top:6px; line-height:1.5;">
-        Tus mejores puntajes, gráfico de progreso, días de entrenamiento y objetivos personales.
+    <!-- Estadísticas históricas -->
+    <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:10px; margin-bottom:16px;">
+      <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(230,57,70,0.15); border-radius:14px; padding:14px 8px; text-align:center;">
+        <div style="font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600;">MEJOR</div>
+        <div id="stat-mejor" style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:#E63946; margin-top:4px; line-height:1;">--</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(230,57,70,0.15); border-radius:14px; padding:14px 8px; text-align:center;">
+        <div style="font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600;">INTENTOS</div>
+        <div id="stat-intentos" style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:white; margin-top:4px; line-height:1;">--</div>
+      </div>
+      <div style="background:rgba(255,255,255,0.04); border:1px solid rgba(230,57,70,0.15); border-radius:14px; padding:14px 8px; text-align:center;">
+        <div style="font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600;">PROMEDIO</div>
+        <div id="stat-promedio" style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:white; margin-top:4px; line-height:1;">--</div>
+      </div>
+    </div>
+
+    <!-- Últimos intentos -->
+    <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(230,57,70,0.12); border-radius:14px; padding:16px; margin-bottom:16px;">
+      <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600; margin-bottom:12px;">ÚLTIMOS INTENTOS</div>
+      <div id="stat-historial">
+        <div style="font-family:'Barlow Condensed',sans-serif; font-size:13px; color:rgba(245,245,245,0.4); text-align:center; padding:8px 0;">Cargando...</div>
       </div>
     </div>
 
@@ -2099,8 +2110,53 @@ async function loadRankingFromSupabase() {
 
 function goToPerfil() {
   loadProfileData();
+  loadPlayerStats();
   goTo('screen-perfil');
   updateNav('perfil');
+}
+
+async function loadPlayerStats() {
+  if (!supabaseClient || !currentUser) return;
+
+  // Mejor puntaje desde ranking_publico
+  const { data: rankRow } = await supabaseClient
+    .from('ranking_publico')
+    .select('mejor_t1_ochos')
+    .eq('jugadora_id', currentUser.id)
+    .maybeSingle();
+
+  // Últimos 10 intentos desde resultados_test
+  const { data: resultados } = await supabaseClient
+    .from('resultados_test')
+    .select('resultado_principal, fecha')
+    .eq('jugadora_id', currentUser.id)
+    .eq('tipo_test', 'T1_OCHOS')
+    .order('fecha', { ascending: false })
+    .limit(10);
+
+  const mejor = rankRow ? (rankRow.mejor_t1_ochos || 0) : 0;
+  const intentos = resultados ? resultados.length : 0;
+  const promedio = intentos
+    ? Math.round(resultados.reduce((s, r) => s + (r.resultado_principal || 0), 0) / intentos)
+    : 0;
+
+  document.getElementById('stat-mejor').textContent    = mejor    || '--';
+  document.getElementById('stat-intentos').textContent = intentos || '--';
+  document.getElementById('stat-promedio').textContent = promedio || '--';
+
+  const histDiv = document.getElementById('stat-historial');
+  if (!intentos) {
+    histDiv.innerHTML = '<div style="font-family:\'Barlow Condensed\',sans-serif; font-size:13px; color:rgba(245,245,245,0.4); text-align:center; padding:8px 0;">Sin intentos todavía</div>';
+    return;
+  }
+
+  histDiv.innerHTML = resultados.slice(0, 5).map(r => {
+    const fecha = r.fecha ? new Date(r.fecha).toLocaleDateString('es-AR', { day: '2-digit', month: '2-digit', year: '2-digit' }) : '';
+    return `<div style="display:flex; justify-content:space-between; align-items:center; padding:8px 0; border-bottom:1px solid rgba(255,255,255,0.05);">
+      <span style="font-family:'Barlow Condensed',sans-serif; font-size:13px; color:rgba(245,245,245,0.6);">${fecha}</span>
+      <span style="font-family:'Bebas Neue',sans-serif; font-size:20px; color:#E63946;">${r.resultado_principal ?? '--'}</span>
+    </div>`;
+  }).join('');
 }
 
 function loadProfileData() {
