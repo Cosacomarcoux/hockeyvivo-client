@@ -1657,11 +1657,14 @@
         <div style="font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600;">EDAD</div>
         <div id="perfil-edad" style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:white; margin-top:4px; line-height:1;">--</div>
       </div>
-      <div style="
+      <div onclick="mostrarInfoCategoria()" style="
         background: rgba(255,255,255,0.04); border: 1px solid rgba(230,57,70,0.15);
-        border-radius: 14px; padding: 16px;
+        border-radius: 14px; padding: 16px; cursor: pointer;
       ">
-        <div style="font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600;">CATEGORÍA</div>
+        <div style="display:flex; justify-content:space-between; align-items:center;">
+          <div style="font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600;">CATEGORÍA</div>
+          <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; color:rgba(230,57,70,0.6);">?</div>
+        </div>
         <div id="perfil-categoria" style="font-family:'Bebas Neue',sans-serif; font-size:28px; color:#E63946; margin-top:4px; line-height:1;">--</div>
       </div>
     </div>
@@ -1728,6 +1731,38 @@
     <button onclick="confirmSignOut()" class="logout-btn" style="text-align: center; padding: 14px;">
       Cerrar sesión
     </button>
+  </div>
+
+  <!-- Modal: info categoría -->
+  <div id="modal-categoria" onclick="cerrarModalCategoria()" style="
+    display:none; position:fixed; inset:0; z-index:9999;
+    background:rgba(0,0,0,0.75); align-items:center; justify-content:center; padding:24px;
+  ">
+    <div onclick="event.stopPropagation()" style="
+      background:#1A1A1A; border:1px solid #E63946; border-radius:18px;
+      padding:28px 24px; max-width:380px; width:100%;
+    ">
+      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:#E63946; letter-spacing:1px; margin-bottom:14px;">¿QUE ES LA CATEGORIA?</div>
+      <div style="font-family:'Barlow Condensed',sans-serif; font-size:14px; color:rgba(245,245,245,0.85); line-height:1.6; margin-bottom:14px;">
+        La categoría agrupa por <strong style="color:white;">EDAD</strong>, no por habilidad. Sirve para que compitas de forma justa contra jugadoras de tu edad.
+      </div>
+      <div style="font-family:'Barlow Condensed',sans-serif; font-size:13px; color:rgba(245,245,245,0.7); line-height:1.9; margin-bottom:14px;">
+        • <strong style="color:white;">U11:</strong> hasta 11 años<br>
+        • <strong style="color:white;">U14:</strong> 12 a 14 años<br>
+        • <strong style="color:white;">U16:</strong> 15 a 16 años<br>
+        • <strong style="color:white;">U19:</strong> 17 a 19 años<br>
+        • <strong style="color:white;">OPN:</strong> 20 años en adelante (Open/Libre)
+      </div>
+      <div style="font-family:'Barlow Condensed',sans-serif; font-size:13px; color:rgba(245,245,245,0.6); line-height:1.6; margin-bottom:20px;">
+        Se calcula sola según tu fecha de nacimiento y cambia cuando cumplís años. No se sube jugando.<br><br>
+        <span style="color:rgba(230,57,70,0.9);">👉</span> Para subir de <strong style="color:white;">HABILIDAD</strong>, mirá tu <strong style="color:white;">NIVEL</strong> (Iniciado → Elite), que sí sube con tus challenges.
+      </div>
+      <button onclick="cerrarModalCategoria()" style="
+        width:100%; padding:14px; background:#E63946; border:none; border-radius:10px;
+        font-family:'Bebas Neue',sans-serif; font-size:18px; color:white;
+        letter-spacing:1px; cursor:pointer;
+      ">ENTENDIDO</button>
+    </div>
   </div>
 </div>
 
@@ -2112,6 +2147,16 @@ async function loadRankingFromSupabase() {
     console.error('Error en loadRankingFromSupabase:', e);
     return null;
   }
+}
+
+function mostrarInfoCategoria() {
+  const m = document.getElementById('modal-categoria');
+  if (m) { m.style.display = 'flex'; }
+}
+
+function cerrarModalCategoria() {
+  const m = document.getElementById('modal-categoria');
+  if (m) { m.style.display = 'none'; }
 }
 
 function goToPerfil() {
