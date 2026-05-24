@@ -3456,12 +3456,11 @@ function showResult() {
 // ============================================================
 async function saveResultToSupabase() {
   console.log('saveResultToSupabase llamada. currentUser:', currentUser, 'finalScore:', finalScore);
-  // Only save if user is logged in and we have a profile
+  // Only save if user is logged in
   if (!supabaseClient || !currentUser) {
-    console.log('No hay sesión — no se guarda en la nube');
+    console.log('No hay sesion - no se guarda en la nube');
     return false;
   }
-
   try {
     // 1. Create a session record (a self-test session by the player herself)
     const { data: sesion, error: errSesion } = await supabaseClient
