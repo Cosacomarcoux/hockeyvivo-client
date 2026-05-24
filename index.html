@@ -3373,12 +3373,14 @@ async function saveResultToSupabase() {
     // save the result without a session link.
     const sesionId = (sesion && sesion.id) ? sesion.id : null;
     if (errSesion) console.log('Sesión no creada (ok, seguimos):', errSesion.message);
+    console.log('Paso 1 sesiones:', sesion, errSesion);
 
     // 2. Save the test result
+    const validSamples = (speedSamples || []).filter(s => s > 0 && s < 30000);
     const datosCalculados = {
       pace: +(finalScore / 60).toFixed(3),
-      mejor_tiempo_ms: speedSamples.length ? Math.min(...speedSamples.filter(s => s > 0 && s < 30000)) : null,
-      sospechoso: suspiciousFlag
+      mejor_tiempo_ms: validSamples.length ? Math.min(...validSamples) : null,
+      sospechoso: !!suspiciousFlag
     };
 
     const { error: errResult } = await supabaseClient
@@ -3393,12 +3395,14 @@ async function saveResultToSupabase() {
         datos_calculados: datosCalculados
       });
 
+    console.log('Paso 2 resultados:', errResult);
     if (errResult) {
       console.error('Error guardando resultado:', errResult.message);
       return false;
     }
 
     // 3. Update public ranking (only if this is a new best for T1)
+    console.log('Paso 3: voy a actualizar ranking');
     await updateRankingPublico();
 
     console.log('✅ Resultado guardado en Supabase');
@@ -3449,6 +3453,7 @@ async function updateRankingPublico() {
       ultima_actualizacion: new Date().toISOString(),
       visible: !suspiciousFlag
     });
+  console.log('Paso 4 ranking upsert hecho');
 }
 
 async function submitResult() {
