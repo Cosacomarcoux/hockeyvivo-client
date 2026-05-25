@@ -1446,14 +1446,24 @@
         </div>
       </div>
 
-      <div class="ranking-filters">
-        <button class="filter-pill active" onclick="setFilter(this, 'semana')">Esta semana</button>
-        <button class="filter-pill" onclick="setFilter(this, 'mes')">Este mes</button>
-        <button class="filter-pill" onclick="setFilter(this, 'todo')">Todo el tiempo</button>
+      <div class="ranking-filters" id="ranking-nivel-tabs">
+        <button class="filter-pill" onclick="setRankingNivel('INICIADO')">INICIADO</button>
+        <button class="filter-pill" onclick="setRankingNivel('INTERMEDIO')">INTERMEDIO</button>
+        <button class="filter-pill" onclick="setRankingNivel('AVANZADO')">AVANZADO</button>
+        <button class="filter-pill" onclick="setRankingNivel('ELITE')">ELITE</button>
       </div>
     </div>
 
     <div class="ranking-list" id="ranking-list" style="padding: 0 20px;"></div>
+
+    <div id="ranking-ver-mas-wrap" style="display:none; padding: 0 20px 20px; text-align:center;">
+      <button onclick="cargarMasRanking()" style="
+        background:rgba(255,255,255,0.06); border:1px solid rgba(230,57,70,0.3);
+        border-radius:10px; color:rgba(245,245,245,0.7); padding:12px 32px;
+        font-family:'Barlow Condensed',sans-serif; font-size:14px; letter-spacing:1px;
+        cursor:pointer;
+      ">VER MÁS</button>
+    </div>
   </div>
 </div>
 
@@ -2086,37 +2096,78 @@ async function goToRanking() {
   goTo('screen-ranking');
   updateNav('ranking');
 
-  // Show a quick loading state
-  const list = document.getElementById('ranking-list');
-  if (list) list.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(245,245,245,0.5);font-family:\'Barlow Condensed\',sans-serif;">Cargando ranking...</div>';
+  // Auto-select player's nivel
+  currentRankingNivel  = (currentProfile && currentProfile.nivel) || 'INICIADO';
+  currentRankingOffset = 0;
 
-  const realData = await loadRankingFromSupabase();
-  if (realData && realData.length > 0) {
-    rankingData = realData;
-    renderRanking(realData);
-  } else {
-    // Fallback to whatever we have locally (mock) if Supabase returns nothing
-    renderRanking(rankingData);
-  }
+  updateRankingNivelButtons(currentRankingNivel);
+  await loadAndRenderRanking(false);
 }
 
-async function loadRankingFromSupabase() {
+let currentRankingNivel  = 'INICIADO';
+let currentRankingOffset = 0;
+const RANKING_PAGE_SIZE  = 10;
+
+function updateRankingNivelButtons(nivel) {
+  document.querySelectorAll('#ranking-nivel-tabs .filter-pill').forEach(btn => {
+    btn.classList.toggle('active', btn.textContent.trim() === nivel);
+  });
+}
+
+async function setRankingNivel(nivel) {
+  currentRankingNivel  = nivel;
+  currentRankingOffset = 0;
+  updateRankingNivelButtons(nivel);
+  await loadAndRenderRanking(false);
+}
+
+async function cargarMasRanking() {
+  currentRankingOffset += RANKING_PAGE_SIZE;
+  await loadAndRenderRanking(true);
+}
+
+async function loadAndRenderRanking(append) {
+  const list = document.getElementById('ranking-list');
+  if (!append && list) {
+    list.innerHTML = '<div style="text-align:center;padding:40px;color:rgba(245,245,245,0.5);font-family:\'Barlow Condensed\',sans-serif;">Cargando...</div>';
+  }
+
+  const rows = await loadRankingFromSupabase(currentRankingNivel, currentRankingOffset);
+  if (!rows) return;
+
+  // My position if not in top
+  let myPos = null;
+  const inTop = rows.some(r => r.isMe);
+  if (!inTop && currentUser && currentRankingOffset === 0) {
+    myPos = await fetchMyRankingPosition(currentRankingNivel);
+  }
+
+  const verMasWrap = document.getElementById('ranking-ver-mas-wrap');
+  if (verMasWrap) verMasWrap.style.display = rows.length === RANKING_PAGE_SIZE ? 'block' : 'none';
+
+  renderRanking(rows, myPos, append, currentRankingOffset);
+}
+
+async function loadRankingFromSupabase(nivel, offset) {
   if (!supabaseClient) return null;
   try {
-    // Read public ranking without join to avoid FK resolution issues
+    const from = offset || 0;
+    const to   = from + RANKING_PAGE_SIZE - 1;
+
     const { data, error } = await supabaseClient
       .from('ranking_publico')
       .select('mejor_t1_ochos, categoria_edad, nivel, pais, provincia, visible, jugadora_id')
       .eq('visible', true)
+      .eq('nivel', nivel)
       .order('mejor_t1_ochos', { ascending: false })
-      .limit(100);
+      .range(from, to);
 
     if (error) {
       console.error('Error leyendo ranking:', error.message);
       return null;
     }
 
-    // Fetch names in a second query using the collected jugadora_ids
+    // Fetch names in a second query
     const ids = (data || []).map(r => r.jugadora_id).filter(Boolean);
     const namesMap = {};
     if (ids.length > 0) {
@@ -2129,22 +2180,45 @@ async function loadRankingFromSupabase() {
       }
     }
 
-    // Map to the format renderRanking expects
-    return (data || []).map(r => {
-      const fullName = namesMap[r.jugadora_id] || 'Jugadora';
-      return {
-        name: fullName,
-        country: r.pais || '',
-        score: r.mejor_t1_ochos || 0,
-        nivel: r.nivel,
-        categoria: r.categoria_edad,
-        date: '',
-        suspicious: false,
-        isMe: r.jugadora_id === (currentUser && currentUser.id)
-      };
-    });
+    return (data || []).map(r => ({
+      name:     namesMap[r.jugadora_id] || 'Jugadora',
+      country:  r.pais || '',
+      score:    r.mejor_t1_ochos || 0,
+      nivel:    r.nivel,
+      categoria: r.categoria_edad,
+      isMe:     r.jugadora_id === (currentUser && currentUser.id)
+    }));
   } catch (e) {
     console.error('Error en loadRankingFromSupabase:', e);
+    return null;
+  }
+}
+
+async function fetchMyRankingPosition(nivel) {
+  if (!supabaseClient || !currentUser) return null;
+  try {
+    // Get my score
+    const { data: myRow } = await supabaseClient
+      .from('ranking_publico')
+      .select('mejor_t1_ochos')
+      .eq('jugadora_id', currentUser.id)
+      .maybeSingle();
+    if (!myRow) return null;
+
+    // Count how many players in this nivel scored higher
+    const { count } = await supabaseClient
+      .from('ranking_publico')
+      .select('jugadora_id', { count: 'exact', head: true })
+      .eq('visible', true)
+      .eq('nivel', nivel)
+      .gt('mejor_t1_ochos', myRow.mejor_t1_ochos);
+
+    const myName = (currentProfile && currentProfile.nombre && currentProfile.apellido)
+      ? (currentProfile.nombre + ' ' + currentProfile.apellido).trim()
+      : 'Vos';
+
+    return { pos: (count || 0) + 1, name: myName, score: myRow.mejor_t1_ochos };
+  } catch (e) {
     return null;
   }
 }
@@ -4153,40 +4227,64 @@ function retryChallenge() {
 // ============================================================
 //  RANKING
 // ============================================================
-let currentFilter = 'semana';
+// setFilter kept for compatibility but no longer used by ranking screen
 
-function setFilter(el, filter) {
-  document.querySelectorAll('.filter-pill').forEach(p => p.classList.remove('active'));
-  el.classList.add('active');
-  currentFilter = filter;
-  renderRanking(rankingData);
-}
-
-function renderRanking(data) {
+function renderRanking(rows, myPos, append, offset) {
   const list = document.getElementById('ranking-list');
   if (!list) return;
 
-  // Filter suspicious for public ranking
-  const clean = data.filter(r => !r.suspicious || !r.pendingReview);
+  const medals    = ['🥇', '🥈', '🥉'];
+  const topClass  = ['top-1', 'top-2', 'top-3'];
+  const startPos  = (offset || 0) + 1;
 
-  const medals = ['🥇', '🥈', '🥉'];
-  const topClass = ['top-1', 'top-2', 'top-3'];
-
-  list.innerHTML = clean.slice(0, 20).map((r, i) => {
-    const isUser = r.name === playerName && r.score === finalScore;
-    const rankDisplay = i < 3 ? medals[i] : (i + 1);
+  const rowsHtml = rows.map((r, i) => {
+    const pos        = startPos + i;
+    const rankDisplay = pos <= 3 ? medals[pos - 1] : pos;
+    const cls        = pos <= 3 ? topClass[pos - 1] : '';
+    const meBorder   = r.isMe ? 'border:1px solid #E63946;' : '';
     return `
-      <div class="ranking-item ${i < 3 ? topClass[i] : ''} ${isUser ? 'highlight' : ''}">
+      <div class="ranking-item ${cls}" style="${meBorder}">
         <div class="rank-pos">${rankDisplay}</div>
         <div class="rank-avatar">${r.name.charAt(0).toUpperCase()}</div>
         <div class="rank-info">
-          <div class="rank-name">${r.name}${isUser ? ' 👈' : ''}</div>
-          <div class="rank-detail">${r.country} · ${r.date}</div>
+          <div class="rank-name">${r.name}${r.isMe ? ' 👈' : ''}</div>
+          <div class="rank-detail">${r.country || ''}</div>
         </div>
         <div class="rank-score">${r.score}<span>OCHOS</span></div>
       </div>
     `;
   }).join('');
+
+  if (append) {
+    // Remove the "my position" row if it was appended before
+    const old = list.querySelector('#my-ranking-row');
+    if (old) old.remove();
+    list.insertAdjacentHTML('beforeend', rowsHtml);
+  } else {
+    list.innerHTML = rowsHtml;
+  }
+
+  // My position row (only when not in top, only after first page)
+  const existing = list.querySelector('#my-ranking-row');
+  if (existing) existing.remove();
+  if (myPos) {
+    list.insertAdjacentHTML('beforeend', `
+      <div id="my-ranking-row" style="
+        margin-top:12px; border-top:1px solid rgba(230,57,70,0.3);
+        padding-top:12px;
+      ">
+        <div style="font-family:'Barlow Condensed',sans-serif; font-size:10px; letter-spacing:2px; color:rgba(245,245,245,0.4); margin-bottom:6px;">TU POSICIÓN</div>
+        <div class="ranking-item" style="border:1px solid #E63946;">
+          <div class="rank-pos">#${myPos.pos}</div>
+          <div class="rank-avatar" style="background:#E63946;">${myPos.name.charAt(0).toUpperCase()}</div>
+          <div class="rank-info">
+            <div class="rank-name">${myPos.name} 👈</div>
+          </div>
+          <div class="rank-score">${myPos.score}<span>OCHOS</span></div>
+        </div>
+      </div>
+    `);
+  }
 }
 
 // ============================================================
