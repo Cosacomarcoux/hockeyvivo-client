@@ -3076,6 +3076,7 @@ let coneMarkingStep = 0;        // 0 = none, 1 = A placed, 2 = both placed
 let eightState = 0;            // 0..4
 let firstConeVisited = null;   // 'A' or 'B' — which cone was visited first
 let centerCrossings = 0;       // count of times ball crossed the center vertical line
+let verticalRangeInState = { minY: Infinity, maxY: -Infinity };
 let lastCenterSide = null;     // 'left' or 'right' of midline (for crossing detection)
 let stateStartTime = 0;
 
@@ -3092,6 +3093,7 @@ function resetEightState() {
   lastCenterSide = null;
   stateStartTime = 0;
   lastBallMoveTime = 0;
+  verticalRangeInState = { minY: Infinity, maxY: -Infinity };
 }
 
 function updateConePositions() {
@@ -3126,10 +3128,17 @@ function detectEight(newPos) {
   }
   if (currentSide !== 'center') lastCenterSide = currentSide;
 
+  // Track vertical range for the current attempt (to distinguish real 8 from lateral dribbling)
+  verticalRangeInState.minY = Math.min(verticalRangeInState.minY, newPos.y);
+  verticalRangeInState.maxY = Math.max(verticalRangeInState.maxY, newPos.y);
+
   // Is ball OUTSIDE either cone right now? (A = whichever the user labeled, but
   // geometry uses left/right). We map: outsideA = past the left cone, outsideB = past the right cone
   const outsideLeft  = newPos.x < leftCone.x;
   const outsideRight = newPos.x > rightCone.x;
+
+  const separacionConos = Math.abs(rightCone.x - leftCone.x);
+  const minMovVertical = separacionConos * 0.20;
   // Map back to A/B labels for the state machine
   const aIsLeft = (coneA.x <= coneB.x);
   const outsideA = aIsLeft ? outsideLeft : outsideRight;
@@ -3156,6 +3165,7 @@ function detectEight(newPos) {
     eightState = 0;
     firstConeVisited = null;
     centerCrossings = 0;
+    verticalRangeInState = { minY: Infinity, maxY: -Infinity };
   }
 
   // STATE MACHINE
@@ -3202,19 +3212,23 @@ function detectEight(newPos) {
       // Second cone wrapped — waiting for closing center crossing
       if (justCrossed) {
         // FIGURE-8 COMPLETE!
-        if (now - lastEightTime > eightCooldown) {
-          if (lastEightTime > 0 && (now - lastEightTime) < 350) suspiciousFlag = true;
-          lastEightTime = now;
-          speedSamples.push(now - (lastCountTime || now));
-          lastCountTime = now;
-          if (speedSamples.length > 10) speedSamples.shift();
+        const rangoVertical = verticalRangeInState.maxY - verticalRangeInState.minY;
+        if (rangoVertical >= minMovVertical) {
+          if (now - lastEightTime > eightCooldown) {
+            if (lastEightTime > 0 && (now - lastEightTime) < 350) suspiciousFlag = true;
+            lastEightTime = now;
+            speedSamples.push(now - (lastCountTime || now));
+            lastCountTime = now;
+            if (speedSamples.length > 10) speedSamples.shift();
 
-          registerEight();
+            registerEight();
+          }
         }
         // Reset to state 0 to start next eight
         eightState = 0;
         firstConeVisited = null;
         centerCrossings = 0;
+        verticalRangeInState = { minY: Infinity, maxY: -Infinity };
       }
       break;
   }
