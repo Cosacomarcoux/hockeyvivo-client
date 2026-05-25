@@ -3804,6 +3804,15 @@ async function actualizarNivelJugadora() {
     repeticiones_umbral: repeticiones
   }).eq('id', currentUser.id);
 
+  // Si subió de nivel grande, mover su fila en ranking_publico al nivel nuevo
+  // Esto debe correr DESPUÉS de updateRankingPublico para sobrescribir el nivel viejo
+  if (nuevoNivel !== nivelActual) {
+    await supabaseClient
+      .from('ranking_publico')
+      .update({ nivel: nuevoNivel })
+      .eq('jugadora_id', currentUser.id);
+  }
+
   currentProfile.nivel = nuevoNivel;
   currentProfile.subnivel = nuevoSubnivel;
 
