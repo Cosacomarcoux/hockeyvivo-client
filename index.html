@@ -2149,6 +2149,26 @@ async function loadRankingFromSupabase() {
   }
 }
 
+function mostrarInfoNivel() {
+  const d = window._nivelInfoData || {};
+  const nivel       = d.nivel        || 'INICIADO';
+  const repsActual  = d.repsActual   ?? 0;
+  const repsMax     = d.repsMax      ?? '?';
+  const umbral      = d.umbralProximo ?? '?';
+  const cfg         = NIVELES_CONFIG[nivel];
+  const proxNivel   = cfg ? NIVELES_ORDEN[NIVELES_ORDEN.indexOf(nivel) + 1] : null;
+  const proxTexto   = proxNivel ? proxNivel : '(ya sos ELITE)';
+  alert(
+    '🎯 ¿CÓMO SUBIR DE NIVEL?\n\n' +
+    'Estás en: ' + nivel + '\n\n' +
+    'Para pasar al próximo nivel necesitás:\n' +
+    '• Hacer ' + umbral + ' ochos o más\n' +
+    '• Lograrlo ' + repsMax + ' veces\n\n' +
+    'Llevás ' + repsActual + ' de ' + repsMax + '.\n\n' +
+    'Los subniveles te ayudan a progresar mientras tanto. ¡Seguí practicando!'
+  );
+}
+
 function mostrarInfoCategoria() {
   const m = document.getElementById('modal-categoria');
   if (m) { m.style.display = 'flex'; }
@@ -2187,25 +2207,36 @@ async function mostrarNivelEnPerfil() {
   const cfg        = NIVELES_CONFIG[nivel] || NIVELES_CONFIG['INICIADO'];
   const repsMax    = cfg.repsNecesarias < 999 ? cfg.repsNecesarias : null;
 
-  const pctSubnivel = Math.round((subnivel / 5) * 100);
-  const pctReps     = repsMax ? Math.min(Math.round((repsActual / repsMax) * 100), 100) : 0;
+  const pctReps = repsMax ? Math.min(Math.round((repsActual / repsMax) * 100), 100) : 0;
+
+  // Texto objetivo del próximo subnivel
+  let textoSubnivel;
+  if (subnivel >= 5) {
+    textoSubnivel = '¡Subnivel máximo! Seguí sumando para cambiar de nivel.';
+  } else {
+    const umbralProxSub = cfg.subniveles[subnivel]; // subniveles[subnivel] = umbral para subnivel+1
+    textoSubnivel = `Hacé ${umbralProxSub} ochos para subir a ${nivel} ${subnivel + 1}`;
+  }
+
+  // Guardamos los datos para el modal de nivel grande
+  window._nivelInfoData = { nivel, repsActual, repsMax, umbralProximo: cfg.umbralProximo };
 
   bloque.innerHTML = `
     <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; letter-spacing:2px; color:#E63946; font-weight:700; margin-bottom:12px;">NIVEL ACTUAL</div>
-    <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:6px;">
+    <div style="display:flex; align-items:baseline; gap:10px; margin-bottom:8px;">
       <span style="font-family:'Bebas Neue',sans-serif; font-size:36px; color:white; line-height:1;">${nivel}</span>
       <span style="font-family:'Barlow Condensed',sans-serif; font-size:14px; color:rgba(245,245,245,0.55); letter-spacing:1px;">Nivel ${subnivel} de 5</span>
     </div>
-    <div style="background:rgba(255,255,255,0.08); border-radius:999px; height:8px; overflow:hidden; margin-bottom:16px;">
-      <div style="height:100%; width:${pctSubnivel}%; background:linear-gradient(90deg,#E63946,#FF2D45); border-radius:999px; transition:width 0.6s ease;"></div>
-    </div>
+    <div style="font-family:'Barlow Condensed',sans-serif; font-size:13px; color:rgba(245,245,245,0.6); margin-bottom:16px; line-height:1.4;">${textoSubnivel}</div>
     ${repsMax ? `
-    <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
-      <span style="font-family:'Barlow Condensed',sans-serif; font-size:11px; letter-spacing:1px; color:rgba(245,245,245,0.45);">REPS HACIA PRÓXIMO NIVEL</span>
-      <span style="font-family:'Barlow Condensed',sans-serif; font-size:12px; color:rgba(245,245,245,0.7); font-weight:600;">${repsActual} / ${repsMax}</span>
-    </div>
-    <div style="background:rgba(255,255,255,0.06); border-radius:999px; height:5px; overflow:hidden;">
-      <div style="height:100%; width:${pctReps}%; background:#E63946; border-radius:999px; transition:width 0.6s ease;"></div>
+    <div onclick="mostrarInfoNivel()" style="cursor:pointer;">
+      <div style="display:flex; justify-content:space-between; align-items:center; margin-bottom:5px;">
+        <span style="font-family:'Barlow Condensed',sans-serif; font-size:11px; letter-spacing:1px; color:rgba(245,245,245,0.45);">REPS HACIA PRÓXIMO NIVEL</span>
+        <span style="font-family:'Barlow Condensed',sans-serif; font-size:12px; color:rgba(245,245,245,0.7); font-weight:600;">${repsActual} / ${repsMax} <span style="color:#E63946; font-size:11px;">ⓘ</span></span>
+      </div>
+      <div style="background:rgba(255,255,255,0.06); border-radius:999px; height:5px; overflow:hidden;">
+        <div style="height:100%; width:${pctReps}%; background:#E63946; border-radius:999px; transition:width 0.6s ease;"></div>
+      </div>
     </div>` : `
     <div style="font-family:'Barlow Condensed',sans-serif; font-size:12px; color:rgba(245,245,245,0.4); letter-spacing:1px; text-align:center; padding-top:4px;">NIVEL MÁXIMO</div>`}
   `;
@@ -3673,7 +3704,15 @@ async function actualizarNivelJugadora() {
     .gte('resultado_principal', cfg.umbralProximo);
   let repeticiones = (intentos || []).length;
 
-  const nuevoSubnivel = calcularSubnivel(nivelActual, mejorPuntaje);
+  // Subnivel sube de a uno por challenge: solo sube si el puntaje actual
+  // supera el umbral del siguiente subnivel (máximo +1 por vez)
+  let nuevoSubnivel = subnivelAnterior;
+  if (subnivelAnterior < 5) {
+    const umbralSiguienteSubnivel = cfg.subniveles[subnivelAnterior]; // subniveles[n] = umbral para pasar a n+1
+    if (finalScore >= umbralSiguienteSubnivel) {
+      nuevoSubnivel = subnivelAnterior + 1;
+    }
+  }
 
   // ¿Junta las repeticiones necesarias para subir de nivel grande?
   let nuevoNivel = nivelActual;
