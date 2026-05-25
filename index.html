@@ -3128,10 +3128,8 @@ function detectEight(newPos) {
 
   // Is ball OUTSIDE either cone right now? (A = whichever the user labeled, but
   // geometry uses left/right). We map: outsideA = past the left cone, outsideB = past the right cone
-  const separacion = Math.abs(rightCone.x - leftCone.x);
-  const margenAfuera = separacion * 0.15; // debe pasar 15% MÁS ALLÁ del cono para contar como "rodeó"
-  const outsideLeft  = newPos.x < (leftCone.x - margenAfuera);
-  const outsideRight = newPos.x > (rightCone.x + margenAfuera);
+  const outsideLeft  = newPos.x < leftCone.x;
+  const outsideRight = newPos.x > rightCone.x;
   // Map back to A/B labels for the state machine
   const aIsLeft = (coneA.x <= coneB.x);
   const outsideA = aIsLeft ? outsideLeft : outsideRight;
