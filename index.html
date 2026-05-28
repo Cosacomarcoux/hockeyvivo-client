@@ -2106,10 +2106,11 @@ async function loadAndRenderRanking(append) {
   const rows = await loadRankingFromSupabase(currentRankingNivel, currentRankingOffset);
   if (!rows) return;
 
-  // My position if not in top
+  // My position if not in top — only when viewing own level
   let myPos = null;
-  const inTop = rows.some(r => r.isMe);
-  if (!inTop && currentUser && currentRankingOffset === 0) {
+  const myNivel = currentProfile && currentProfile.nivel;
+  const inTop   = rows.some(r => r.isMe);
+  if (!inTop && currentUser && currentRankingOffset === 0 && currentRankingNivel === myNivel) {
     myPos = await fetchMyRankingPosition(currentRankingNivel);
   }
 
