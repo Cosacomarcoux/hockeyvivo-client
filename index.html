@@ -2243,6 +2243,30 @@ function mostrarInfoNivel() {
   );
 }
 
+function mostrarCartelNivel(titulo, mensaje, emoji) {
+  const overlay = document.getElementById('modal-nivel');
+  const card    = document.getElementById('modal-nivel-card');
+  if (!overlay) return;
+  document.getElementById('modal-nivel-emoji').textContent   = emoji || '🎉';
+  document.getElementById('modal-nivel-titulo').textContent  = titulo;
+  document.getElementById('modal-nivel-mensaje').textContent = mensaje;
+  overlay.style.display = 'flex';
+  // Trigger fade-in + slide-up
+  requestAnimationFrame(() => {
+    overlay.style.opacity = '1';
+    card.style.transform  = 'translateY(0)';
+  });
+}
+
+function cerrarCartelNivel() {
+  const overlay = document.getElementById('modal-nivel');
+  const card    = document.getElementById('modal-nivel-card');
+  if (!overlay) return;
+  overlay.style.opacity = '0';
+  card.style.transform  = 'translateY(16px)';
+  setTimeout(() => { overlay.style.display = 'none'; }, 300);
+}
+
 function mostrarInfoCategoria() {
   const m = document.getElementById('modal-categoria');
   if (m) { m.style.display = 'flex'; }
@@ -3815,11 +3839,19 @@ async function actualizarNivelJugadora() {
 
   // Cartel de felicitaciones
   if (nuevoNivel !== nivelActual) {
-    setTimeout(() => alert('🎉 ¡FELICITACIONES! Subiste a nivel ' + nuevoNivel + ' 1\n\n¡Seguí así para llegar más alto!'), 600);
+    setTimeout(() => mostrarCartelNivel(
+      '¡SUBISTE DE NIVEL!',
+      'Ahora sos ' + nuevoNivel + ' 1\n¡Seguí así para llegar más alto!',
+      '🏆'
+    ), 600);
   } else if (nuevoSubnivel > subnivelAnterior) {
     const falta = cfg.umbralProximo;
-    const reps = cfg.repsNecesarias;
-    setTimeout(() => alert('🎉 ¡BIEN! Subiste a ' + nivelActual + ' ' + nuevoSubnivel + '\n\nPara subir al próximo nivel: hacé ' + falta + '+ ochos, ' + reps + ' veces.'), 600);
+    const reps  = cfg.repsNecesarias;
+    setTimeout(() => mostrarCartelNivel(
+      '¡BIEN! SUBISTE A ' + nivelActual + ' ' + nuevoSubnivel,
+      'Para subir al próximo nivel: hacé ' + falta + '+ ochos, ' + reps + ' veces.',
+      '🎉'
+    ), 600);
   }
 }
 
@@ -4300,5 +4332,33 @@ renderRanking(rankingData);
 
 // Model loads on demand when the user starts a challenge (see startChallenge)
 </script>
+
+<!-- Modal: cartel de nivel/subnivel -->
+<div id="modal-nivel" style="
+  display:none; position:fixed; inset:0; z-index:10000;
+  background:rgba(0,0,0,0.82); align-items:center; justify-content:center;
+  padding:24px; opacity:0; transition:opacity 0.3s ease;
+">
+  <div style="
+    background:#1A1A1A; border:2px solid #E63946; border-radius:20px;
+    padding:36px 28px; max-width:360px; width:100%; text-align:center;
+    transform:translateY(16px); transition:transform 0.3s ease;
+  " id="modal-nivel-card">
+    <div id="modal-nivel-emoji" style="font-size:52px; line-height:1; margin-bottom:12px;">🎉</div>
+    <div id="modal-nivel-titulo" style="
+      font-family:'Bebas Neue',sans-serif; font-size:30px; color:#E63946;
+      letter-spacing:1px; margin-bottom:10px; line-height:1.1;
+    "></div>
+    <div id="modal-nivel-mensaje" style="
+      font-family:'Barlow Condensed',sans-serif; font-size:16px;
+      color:rgba(245,245,245,0.8); line-height:1.6; margin-bottom:28px;
+    "></div>
+    <button onclick="cerrarCartelNivel()" style="
+      width:100%; padding:15px; background:#E63946; border:none; border-radius:12px;
+      font-family:'Bebas Neue',sans-serif; font-size:20px; color:white;
+      letter-spacing:2px; cursor:pointer;
+    ">ACEPTAR</button>
+  </div>
+</div>
 </body>
 </html>
