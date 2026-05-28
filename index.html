@@ -1742,37 +1742,6 @@
     </button>
   </div>
 
-  <!-- Modal: info categoría -->
-  <div id="modal-categoria" onclick="cerrarModalCategoria()" style="
-    display:none; position:fixed; inset:0; z-index:9999;
-    background:rgba(0,0,0,0.75); align-items:center; justify-content:center; padding:24px;
-  ">
-    <div onclick="event.stopPropagation()" style="
-      background:#1A1A1A; border:1px solid #E63946; border-radius:18px;
-      padding:28px 24px; max-width:380px; width:100%;
-    ">
-      <div style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:#E63946; letter-spacing:1px; margin-bottom:14px;">¿QUE ES LA CATEGORIA?</div>
-      <div style="font-family:'Barlow Condensed',sans-serif; font-size:14px; color:rgba(245,245,245,0.85); line-height:1.6; margin-bottom:14px;">
-        La categoría agrupa por <strong style="color:white;">EDAD</strong>, no por habilidad. Sirve para que compitas de forma justa contra jugadoras de tu edad.
-      </div>
-      <div style="font-family:'Barlow Condensed',sans-serif; font-size:13px; color:rgba(245,245,245,0.7); line-height:1.9; margin-bottom:14px;">
-        • <strong style="color:white;">U11:</strong> hasta 11 años<br>
-        • <strong style="color:white;">U14:</strong> 12 a 14 años<br>
-        • <strong style="color:white;">U16:</strong> 15 a 16 años<br>
-        • <strong style="color:white;">U19:</strong> 17 a 19 años<br>
-        • <strong style="color:white;">OPN:</strong> 20 años en adelante (Open/Libre)
-      </div>
-      <div style="font-family:'Barlow Condensed',sans-serif; font-size:13px; color:rgba(245,245,245,0.6); line-height:1.6; margin-bottom:20px;">
-        Se calcula sola según tu fecha de nacimiento y cambia cuando cumplís años. No se sube jugando.<br><br>
-        <span style="color:rgba(230,57,70,0.9);">👉</span> Para subir de <strong style="color:white;">HABILIDAD</strong>, mirá tu <strong style="color:white;">NIVEL</strong> (Iniciado → Elite), que sí sube con tus challenges.
-      </div>
-      <button onclick="cerrarModalCategoria()" style="
-        width:100%; padding:14px; background:#E63946; border:none; border-radius:10px;
-        font-family:'Bebas Neue',sans-serif; font-size:18px; color:white;
-        letter-spacing:1px; cursor:pointer;
-      ">ENTENDIDO</button>
-    </div>
-  </div>
 </div>
 
 <!-- ========== BOTTOM NAV ========== -->
@@ -2222,58 +2191,80 @@ async function fetchMyRankingPosition(nivel) {
   }
 }
 
-function mostrarInfoNivel() {
-  const d = window._nivelInfoData || {};
-  const nivel       = d.nivel        || 'INICIADO';
-  const repsActual  = d.repsActual   ?? 0;
-  const repsMax     = d.repsMax      ?? '?';
-  const umbral      = d.umbralProximo ?? '?';
-  const cfg         = NIVELES_CONFIG[nivel];
-  const proxNivel   = cfg ? NIVELES_ORDEN[NIVELES_ORDEN.indexOf(nivel) + 1] : null;
-  const proxTexto   = proxNivel ? proxNivel : '(ya sos ELITE)';
-  alert(
-    '🎯 ¿CÓMO SUBIR DE NIVEL?\n\n' +
-    'Estás en: ' + nivel + '\n\n' +
-    'Para pasar al próximo nivel necesitás:\n' +
-    '• Hacer ' + umbral + ' ochos o más\n' +
-    '• Lograrlo ' + repsMax + ' veces\n\n' +
-    'Llevás ' + repsActual + ' de ' + repsMax + '.\n\n' +
-    'Los subniveles te ayudan a progresar mientras tanto. ¡Seguí practicando!'
-  );
+// ── Modal unificado ──────────────────────────────────────────
+let _modalQueue   = [];
+let _modalActivo  = false;
+
+function mostrarModal(emoji, titulo, mensajeHtml, btnTexto) {
+  _modalQueue.push({ emoji: emoji || '🎉', titulo, mensajeHtml, btnTexto: btnTexto || 'ACEPTAR' });
+  if (!_modalActivo) _mostrarSiguienteModal();
 }
 
-function mostrarCartelNivel(titulo, mensaje, emoji) {
+function _mostrarSiguienteModal() {
+  if (_modalQueue.length === 0) { _modalActivo = false; return; }
+  _modalActivo = true;
+  const { emoji, titulo, mensajeHtml, btnTexto } = _modalQueue.shift();
   const overlay = document.getElementById('modal-nivel');
   const card    = document.getElementById('modal-nivel-card');
   if (!overlay) return;
-  document.getElementById('modal-nivel-emoji').textContent   = emoji || '🎉';
-  document.getElementById('modal-nivel-titulo').textContent  = titulo;
-  document.getElementById('modal-nivel-mensaje').textContent = mensaje;
+  document.getElementById('modal-nivel-emoji').textContent  = emoji;
+  document.getElementById('modal-nivel-titulo').textContent = titulo;
+  document.getElementById('modal-nivel-mensaje').innerHTML  = mensajeHtml;
+  document.getElementById('modal-nivel-btn').textContent    = btnTexto;
   overlay.style.display = 'flex';
-  // Trigger fade-in + slide-up
   requestAnimationFrame(() => {
     overlay.style.opacity = '1';
     card.style.transform  = 'translateY(0)';
   });
 }
 
-function cerrarCartelNivel() {
+function cerrarModal() {
   const overlay = document.getElementById('modal-nivel');
   const card    = document.getElementById('modal-nivel-card');
   if (!overlay) return;
   overlay.style.opacity = '0';
   card.style.transform  = 'translateY(16px)';
-  setTimeout(() => { overlay.style.display = 'none'; }, 300);
+  setTimeout(() => {
+    overlay.style.display = 'none';
+    _modalActivo = false;
+    _mostrarSiguienteModal();
+  }, 300);
 }
+
+// Aliases para retrocompatibilidad
+const cerrarCartelNivel   = cerrarModal;
+const cerrarModalCategoria = cerrarModal;
+function mostrarCartelNivel(titulo, mensaje, emoji) { mostrarModal(emoji, titulo, mensaje); }
 
 function mostrarInfoCategoria() {
-  const m = document.getElementById('modal-categoria');
-  if (m) { m.style.display = 'flex'; }
+  mostrarModal('📋', '¿QUÉ ES LA CATEGORÍA?',
+    `La categoría agrupa por <strong style="color:white;">EDAD</strong>, no por habilidad. Sirve para que compitas de forma justa contra jugadoras de tu edad.<br><br>
+    • <strong style="color:white;">U11:</strong> hasta 11 años<br>
+    • <strong style="color:white;">U14:</strong> 12 a 14 años<br>
+    • <strong style="color:white;">U16:</strong> 15 a 16 años<br>
+    • <strong style="color:white;">U19:</strong> 17 a 19 años<br>
+    • <strong style="color:white;">OPN:</strong> 20 años en adelante (Open/Libre)<br><br>
+    Se calcula sola según tu fecha de nacimiento y cambia cuando cumplís años. No se sube jugando.<br><br>
+    <span style="color:#E63946;">👉</span> Para subir de <strong style="color:white;">HABILIDAD</strong>, mirá tu <strong style="color:white;">NIVEL</strong> (Iniciado → Elite), que sí sube con tus challenges.`,
+    'ENTENDIDO'
+  );
 }
 
-function cerrarModalCategoria() {
-  const m = document.getElementById('modal-categoria');
-  if (m) { m.style.display = 'none'; }
+function mostrarInfoNivel() {
+  const d        = window._nivelInfoData || {};
+  const nivel    = d.nivel        || 'INICIADO';
+  const repsActual = d.repsActual ?? 0;
+  const repsMax  = d.repsMax      ?? '?';
+  const umbral   = d.umbralProximo ?? '?';
+  mostrarModal('🎯', '¿CÓMO SUBIR DE NIVEL?',
+    `Estás en: <strong style="color:white;">${nivel}</strong><br><br>
+    Para pasar al próximo nivel necesitás:<br>
+    • Hacer <strong style="color:white;">${umbral}</strong> ochos o más<br>
+    • Lograrlo <strong style="color:white;">${repsMax}</strong> veces<br><br>
+    Llevás <strong style="color:white;">${repsActual} de ${repsMax}</strong>.<br><br>
+    <span style="color:#E63946;">📊 SUBNIVELES:</span><br>
+    Subís de subnivel cada vez que superás cierta cantidad de ochos, de a uno por vez. Te ayudan a progresar mientras juntás las repeticiones para cambiar de nivel.`
+  );
 }
 
 function goToPerfil() {
@@ -3697,6 +3688,13 @@ async function saveResultToSupabase() {
     await updateRankingPublico();
     await actualizarNivelJugadora();
 
+    // Show record modal after level/subnivel modals (queue handles sequencing)
+    if (window._pendingRecordModal) {
+      const r = window._pendingRecordModal;
+      window._pendingRecordModal = null;
+      setTimeout(() => mostrarModal(r.emoji, r.titulo, r.mensaje), 600);
+    }
+
     console.log('✅ Resultado guardado en Supabase');
     return true;
   } catch (e) {
@@ -3731,7 +3729,18 @@ async function updateRankingPublico() {
     .maybeSingle();
 
   const prevBest = existing ? (existing.mejor_t1_ochos || 0) : 0;
-  const newBest = Math.max(prevBest, finalScore);
+  const newBest  = Math.max(prevBest, finalScore);
+
+  // Detectar nuevo récord (no contar el primer intento)
+  if (finalScore > prevBest && prevBest > 0 && !suspiciousFlag) {
+    window._pendingRecordModal = {
+      emoji:   '🔥',
+      titulo:  '¡NUEVO RÉCORD!',
+      mensaje: `Tu nueva mejor marca: <strong style="color:white;font-size:1.2em;">${finalScore} ochos</strong><br><br>Anterior: ${prevBest} ochos`
+    };
+  } else {
+    window._pendingRecordModal = null;
+  }
 
   // Upsert ranking row
   await supabaseClient
@@ -3838,18 +3847,16 @@ async function actualizarNivelJugadora() {
 
   // Cartel de felicitaciones
   if (nuevoNivel !== nivelActual) {
-    setTimeout(() => mostrarCartelNivel(
-      '¡SUBISTE DE NIVEL!',
-      'Ahora sos ' + nuevoNivel + ' 1\n¡Seguí así para llegar más alto!',
-      '🏆'
+    setTimeout(() => mostrarModal(
+      '🏆', '¡SUBISTE DE NIVEL!',
+      `Ahora sos <strong style="color:white;">${nuevoNivel} 1</strong><br><br>¡Seguí así para llegar más alto!`
     ), 600);
   } else if (nuevoSubnivel > subnivelAnterior) {
     const falta = cfg.umbralProximo;
     const reps  = cfg.repsNecesarias;
-    setTimeout(() => mostrarCartelNivel(
-      '¡BIEN! SUBISTE A ' + nivelActual + ' ' + nuevoSubnivel,
-      'Para subir al próximo nivel: hacé ' + falta + '+ ochos, ' + reps + ' veces.',
-      '🎉'
+    setTimeout(() => mostrarModal(
+      '🎉', '¡SUBISTE A ' + nivelActual + ' ' + nuevoSubnivel + '!',
+      `Para subir al próximo nivel:<br>• Hacé <strong style="color:white;">${falta}+</strong> ochos<br>• Lograrlo <strong style="color:white;">${reps}</strong> veces`
     ), 600);
   }
 }
@@ -4332,27 +4339,28 @@ renderRanking(rankingData);
 // Model loads on demand when the user starts a challenge (see startChallenge)
 </script>
 
-<!-- Modal: cartel de nivel/subnivel -->
-<div id="modal-nivel" style="
+<!-- Modal unificado (nivel, subnivel, récord, categoría, info) -->
+<div id="modal-nivel" onclick="cerrarModal()" style="
   display:none; position:fixed; inset:0; z-index:10000;
   background:rgba(0,0,0,0.82); align-items:center; justify-content:center;
   padding:24px; opacity:0; transition:opacity 0.3s ease;
 ">
-  <div style="
+  <div onclick="event.stopPropagation()" style="
     background:#1A1A1A; border:2px solid #E63946; border-radius:20px;
-    padding:36px 28px; max-width:360px; width:100%; text-align:center;
+    padding:36px 28px; max-width:380px; width:100%; text-align:center;
     transform:translateY(16px); transition:transform 0.3s ease;
   " id="modal-nivel-card">
     <div id="modal-nivel-emoji" style="font-size:52px; line-height:1; margin-bottom:12px;">🎉</div>
     <div id="modal-nivel-titulo" style="
-      font-family:'Bebas Neue',sans-serif; font-size:30px; color:#E63946;
-      letter-spacing:1px; margin-bottom:10px; line-height:1.1;
+      font-family:'Bebas Neue',sans-serif; font-size:28px; color:#E63946;
+      letter-spacing:1px; margin-bottom:12px; line-height:1.1;
     "></div>
     <div id="modal-nivel-mensaje" style="
-      font-family:'Barlow Condensed',sans-serif; font-size:16px;
-      color:rgba(245,245,245,0.8); line-height:1.6; margin-bottom:28px;
+      font-family:'Barlow Condensed',sans-serif; font-size:14px;
+      color:rgba(245,245,245,0.82); line-height:1.65; margin-bottom:24px;
+      text-align:left;
     "></div>
-    <button onclick="cerrarCartelNivel()" style="
+    <button id="modal-nivel-btn" onclick="cerrarModal()" style="
       width:100%; padding:15px; background:#E63946; border:none; border-radius:12px;
       font-family:'Bebas Neue',sans-serif; font-size:20px; color:white;
       letter-spacing:2px; cursor:pointer;
