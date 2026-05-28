@@ -2518,9 +2518,6 @@ async function startCalibration() {
     calibrationVideoEl = document.getElementById('cal-video');
     calibrationVideoEl.srcObject = calibrationStream;
 
-    // Load model in background (so it's ready when challenge starts)
-    loadModel();
-
     const waitForVideo = setInterval(() => {
       if (calibrationVideoEl.readyState >= 2 && calibrationVideoEl.videoWidth > 0) {
         clearInterval(waitForVideo);
@@ -4301,10 +4298,7 @@ function renderRanking(rows, myPos, append, offset) {
 // ============================================================
 renderRanking(rankingData);
 
-// Preload the AI model in background so when user clicks COMENZAR it's instant
-if (typeof cocoSsd !== 'undefined') {
-  setTimeout(() => loadModel(), 1500);
-}
+// Model loads on demand when the user starts a challenge (see startChallenge)
 </script>
 </body>
 </html>
