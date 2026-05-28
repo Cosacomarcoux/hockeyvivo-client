@@ -1416,10 +1416,12 @@
       </div>
     </div>
 
+    <div id="result-save-status" style="
+      font-family:'Barlow Condensed',sans-serif; font-size:13px; letter-spacing:1px;
+      color:rgba(245,245,245,0.45); text-align:center; margin-bottom:12px;
+    ">Guardando resultado...</div>
+
     <div class="result-actions">
-      <button class="btn-primary" onclick="submitResult()">
-        🏆 SUBIR AL RANKING
-      </button>
       <button class="btn-share" onclick="shareResult()">
         📸 SACAR SELFIE Y COMPARTIR
       </button>
@@ -1427,7 +1429,7 @@
         🔄 INTENTAR DE NUEVO
       </button>
       <button class="btn-secondary" onclick="goToRanking()">
-        Ver ranking global →
+        🏆 VER RANKING
       </button>
     </div>
   </div>
@@ -1979,6 +1981,7 @@ let timerInterval = null;
 let timeLeft = 60;
 let eightCount = 0;
 let challengeActive = false;
+let resultSaved = false;  // guard: auto-save runs only once per challenge
 let finalScore = 0;
 let playerName = '';
 let playerCountry = 'Argentina';
@@ -3625,6 +3628,9 @@ function showResult() {
 
   // Anti-cheat badge
   document.getElementById('suspicion-badge').style.display = suspiciousFlag ? 'block' : 'none';
+
+  // Auto-save result (runs once per challenge, guarded by resultSaved flag)
+  submitResult();
 }
 
 // ============================================================
@@ -3863,10 +3869,13 @@ async function actualizarNivelJugadora() {
 
 async function submitResult() {
   console.log('submitResult ejecutada');
-  // Save to Supabase (cloud) — this is the real persistence now
+  if (resultSaved) { console.log('Ya guardado, skip.'); return; }
+  resultSaved = true;
+
+  // Save to Supabase (cloud)
   const saved = await saveResultToSupabase();
 
-  // Also keep the local mock ranking updated for the immediate UI
+  // Update local ranking cache for immediate UI
   const entry = {
     name: playerName,
     country: playerCountry,
@@ -3878,9 +3887,9 @@ async function submitResult() {
   rankingData.push(entry);
   rankingData.sort((a,b) => b.score - a.score);
 
-  // Navigate to ranking (will load real data from Supabase)
-  goToRanking();
-  updateNav('ranking');
+  // Update save status label
+  const statusEl = document.getElementById('result-save-status');
+  if (statusEl) statusEl.textContent = saved ? '✅ Resultado guardado' : '⚠️ No se pudo guardar (sin conexión)';
 }
 
 // ============================================================
@@ -4254,6 +4263,7 @@ function closeSelfie() {
 }
 
 function retryChallenge() {
+  resultSaved = false;
   // Fully stop camera and reset everything (fixes stretched video bug)
   stopCamera();
   if (videoEl) {
