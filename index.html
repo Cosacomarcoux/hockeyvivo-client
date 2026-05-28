@@ -2946,29 +2946,63 @@ function startDetectionLoop() {
       };
     }
 
-    // ---- TRAJECTORY PREDICTION (vector queue) ----
-    // The model only runs ~12x/sec, but the screen redraws ~60x/sec. Between
-    // real detections (or if the ball moves too fast for the model to catch),
-    // we PREDICT the ball position using the velocity of the last known points.
-    // This keeps the trail smooth & continuous without running the AI more often
-    // (which would waste battery).
+    // ---- TRAJECTORY PREDICTION (quadratic — accounts for curve) ----
+    // The model only runs ~12x/sec but screen redraws ~60x/sec. Between real
+    // detections we predict using velocity + curvature (2nd-order differences)
+    // so the ball follows the arc near cones instead of flying off in a straight line.
     if (detected) {
       // Real detection: push to history queue (keep last 5)
       ballHistory.push({ x: detected.x, y: detected.y, t: Date.now() });
       if (ballHistory.length > 5) ballHistory.shift();
     } else if (ballHistory.length >= 2 && challengeActive) {
-      // No detection this frame — predict from last velocity (linear interpolation)
-      const a = ballHistory[ballHistory.length - 2];
-      const b = ballHistory[ballHistory.length - 1];
-      const dt = Math.max(1, b.t - a.t);
-      const vx = (b.x - a.x) / dt;
-      const vy = (b.y - a.y) / dt;
-      const elapsed = Date.now() - b.t;
-      // Only predict for a short window (300ms) to avoid drifting off if ball truly gone
-      if (elapsed < 300) {
+      const now    = Date.now();
+      const n      = ballHistory.length;
+      const latest = ballHistory[n - 1];
+      const elapsed = now - latest.t;
+
+      // Predict up to 450ms (slightly more aggressive for fast players)
+      if (elapsed < 450) {
+        let px, py;
+
+        if (n >= 3) {
+          // Quadratic prediction using last 3 points:
+          // fit a parabola through p0, p1, p2 and extrapolate to t = latest.t + elapsed
+          const p0 = ballHistory[n - 3];
+          const p1 = ballHistory[n - 2];
+          const p2 = ballHistory[n - 1];
+
+          // Normalise times relative to p0 so numbers stay small
+          const t1 = p1.t - p0.t;
+          const t2 = p2.t - p0.t;
+          const t3 = t2 + elapsed;   // target time
+
+          // Velocity at p2 estimated as weighted average of the two segments
+          const dt01 = Math.max(1, t1);
+          const dt12 = Math.max(1, t2 - t1);
+          const vx1 = (p1.x - p0.x) / dt01;
+          const vy1 = (p1.y - p0.y) / dt01;
+          const vx2 = (p2.x - p1.x) / dt12;
+          const vy2 = (p2.y - p1.y) / dt12;
+
+          // Acceleration (change in velocity per ms)
+          const totalDt = Math.max(1, t2);
+          const ax = (vx2 - vx1) / totalDt;
+          const ay = (vy2 - vy1) / totalDt;
+
+          // Quadratic extrapolation from p2
+          px = p2.x + vx2 * elapsed + 0.5 * ax * elapsed * elapsed;
+          py = p2.y + vy2 * elapsed + 0.5 * ay * elapsed * elapsed;
+        } else {
+          // Fallback: only 2 points — linear
+          const a  = ballHistory[n - 2];
+          const b  = ballHistory[n - 1];
+          const dt = Math.max(1, b.t - a.t);
+          px = b.x + ((b.x - a.x) / dt) * elapsed;
+          py = b.y + ((b.y - a.y) / dt) * elapsed;
+        }
+
         detected = {
-          x: b.x + vx * elapsed,
-          y: b.y + vy * elapsed,
+          x: px, y: py,
           w: lastBallSize || 30,
           h: lastBallSize || 30,
           score: 0.5,
