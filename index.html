@@ -1144,6 +1144,10 @@
     font-family: 'Barlow Condensed', sans-serif; font-size: 12px;
     letter-spacing: 1px; cursor: pointer; padding: 8px; text-decoration: underline;
   }
+  @keyframes rotateIcon {
+    0%, 100% { transform: rotate(0deg); }
+    50% { transform: rotate(90deg); }
+  }
 </style>
 </head>
 <body>
@@ -1347,6 +1351,11 @@
 
 <!-- ========== SCREEN 3: CHALLENGE ========== -->
 <div id="screen-challenge" class="screen">
+  <div id="rotate-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:#0a0a0a; z-index:9999; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; padding:32px;">
+    <div style="font-size:72px; animation:rotateIcon 1.5s ease-in-out infinite; margin-bottom:24px;">📱</div>
+    <div style="font-family:'Bebas Neue',sans-serif; font-size:40px; color:#E63946; letter-spacing:3px; margin-bottom:16px;">GIRÁ TU TELÉFONO</div>
+    <div style="font-family:'Barlow Condensed',sans-serif; font-size:18px; color:rgba(255,255,255,0.7); letter-spacing:1px;">El desafío funciona en modo horizontal</div>
+  </div>
   <div id="video-container">
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas-overlay"></canvas>
@@ -1965,6 +1974,17 @@ async function saveProfileSetup() {
 }
 
 // Start initialization when page loads
+function checkOrientation() {
+  const overlay = document.getElementById('rotate-overlay');
+  if (!overlay) return;
+  const isPortrait = window.innerHeight > window.innerWidth;
+  const challengeScreen = document.getElementById('screen-challenge');
+  const challengeActive = challengeScreen && challengeScreen.classList.contains('active');
+  overlay.style.display = (isPortrait && challengeActive) ? 'flex' : 'none';
+}
+window.addEventListener('resize', checkOrientation);
+window.addEventListener('orientationchange', checkOrientation);
+
 window.addEventListener('load', () => {
   // Set the logo on login screen
   const mainLogo = document.getElementById('hv-logo');
@@ -1972,6 +1992,7 @@ window.addEventListener('load', () => {
   if (mainLogo && loginLogo) loginLogo.src = mainLogo.src;
 
   initSupabase();
+  checkOrientation();
 });
 
 let ballColor = 'amarilla';
@@ -2680,6 +2701,7 @@ async function startChallenge() {
   if (!playerName) playerName = 'Jugadora';
 
   goTo('screen-challenge');
+  checkOrientation();
 
   // Reset all state
   eightCount = 0;
