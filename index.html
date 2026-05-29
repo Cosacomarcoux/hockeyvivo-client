@@ -2690,6 +2690,7 @@ async function startChallenge() {
   coneB = null;
   conesMarked = false;
   coneMarkingStep = 0;
+  resultSaved = false;  // reset save guard for every new challenge
   resetEightState();
 
   document.getElementById('counter-display').textContent = '0';
@@ -3672,7 +3673,12 @@ function showResult() {
 //  SAVE RESULT TO SUPABASE (Fase B)
 // ============================================================
 async function saveResultToSupabase() {
-  console.log('saveResultToSupabase llamada. currentUser:', currentUser, 'finalScore:', finalScore);
+  console.log('🔵 saveResultToSupabase invocada - flag:', resultSaved, '| currentUser:', currentUser && currentUser.id, '| finalScore:', finalScore);
+  // Belt-and-suspenders guard: submitResult also checks this, but we double-check here
+  if (resultSaved) {
+    console.log('🔴 saveResultToSupabase: ya guardado, abortando duplicado');
+    return false;
+  }
   // Only save if user is logged in
   if (!supabaseClient || !currentUser) {
     console.log('No hay sesion - no se guarda en la nube');
