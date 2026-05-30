@@ -1149,6 +1149,25 @@
     50% { transform: rotate(90deg); }
   }
 
+  /* ===== SCREEN: SIN INTENTOS ===== */
+  #screen-sin-intentos {
+    background: var(--negro);
+    align-items: center;
+    justify-content: center;
+    padding: 40px 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  #screen-sin-intentos::before {
+    content: '';
+    position: absolute;
+    width: 500px; height: 500px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(230,57,70,0.12) 0%, transparent 70%);
+    top: -120px; right: -80px;
+    pointer-events: none;
+  }
+
   /* ===== SCREEN: CONSENTIMIENTO ===== */
   #screen-consentimiento {
     background: var(--negro);
@@ -1343,9 +1362,15 @@
     </div>
   </div>
 
-  <button class="btn-primary" onclick="goTo('screen-prep')">
+  <button class="btn-primary" onclick="irAPrep()">
     ⚡ ACEPTAR DESAFÍO
   </button>
+  <div id="intentos-display" style="
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 13px; letter-spacing: 1px;
+    color: rgba(245,245,245,0.5);
+    text-align: center; margin-top: 6px; min-height: 18px;
+  "></div>
   <button class="btn-secondary" onclick="goToRanking()">
     Ver ranking global →
   </button>
@@ -1825,6 +1850,9 @@
       </div>
     </div>
 
+    <!-- Donante IA -->
+    <div id="perfil-donante-bloque" style="margin-bottom:16px;"></div>
+
     <!-- Últimos intentos -->
     <div style="background:rgba(255,255,255,0.03); border:1px solid rgba(230,57,70,0.12); border-radius:14px; padding:16px; margin-bottom:16px;">
       <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600; margin-bottom:12px;">ÚLTIMOS INTENTOS</div>
@@ -1842,6 +1870,28 @@
     </button>
   </div>
 
+</div>
+
+<!-- ========== SCREEN: SIN INTENTOS ========== -->
+<div id="screen-sin-intentos" class="screen">
+  <div class="consentimiento-card">
+    <div class="consentimiento-emoji">😅</div>
+    <div class="consentimiento-titulo">TE QUEDASTE SIN INTENTOS POR HOY</div>
+    <div class="consentimiento-texto" style="text-align:center;">
+      Volvé mañana después de las 00:00 hs para seguir jugando.
+    </div>
+    <div id="sin-intentos-donante-bloque" style="display:none; width:100%;">
+      <div class="consentimiento-texto" style="text-align:center; margin-top:-8px;">
+        ¿Querés más intentos? Sumate al equipo Donante IA y <strong>duplicá tus intentos diarios</strong>.
+      </div>
+      <button class="btn-consentimiento-aceptar" onclick="goTo('screen-consentimiento')" style="margin-top:4px;">
+        QUIERO SER DONANTE
+      </button>
+    </div>
+    <button class="btn-consentimiento-rechazar" onclick="goTo('screen-inicio'); updateNav('inicio')">
+      Volver al inicio
+    </button>
+  </div>
 </div>
 
 <!-- ========== SCREEN: CONSENTIMIENTO ========== -->
@@ -2070,6 +2120,156 @@ async function rechazarConsentimiento() {
   updateNav('inicio');
 }
 
+// ============================================================
+//  SISTEMA DE INTENTOS DIARIOS
+// ============================================================
+function calcularEdad(fechaNacimiento) {
+  const bd = new Date(fechaNacimiento);
+  const today = new Date();
+  let edad = today.getFullYear() - bd.getFullYear();
+  const m = today.getMonth() - bd.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) edad--;
+  return edad;
+}
+
+function fechaHoyArgentina() {
+  return new Date().toLocaleDateString('en-CA', { timeZone: 'America/Argentina/Buenos_Aires' });
+}
+
+async function verificarIntentos() {
+  if (!supabaseClient || !currentUser) return { usados: 0, max: 5, restantes: 5, esDonante: false };
+
+  const { data: jug, error } = await supabaseClient
+    .from('jugadoras')
+    .select('intentos_hoy, fecha_intentos, dona_videos')
+    .eq('id', currentUser.id)
+    .maybeSingle();
+
+  if (error || !jug) return { usados: 0, max: 5, restantes: 5, esDonante: false };
+
+  const hoy = fechaHoyArgentina();
+  let intentosHoy = jug.intentos_hoy || 0;
+
+  // Reseteo automático si cambió el día
+  if (jug.fecha_intentos !== hoy) {
+    intentosHoy = 0;
+    await supabaseClient
+      .from('jugadoras')
+      .update({ intentos_hoy: 0, fecha_intentos: hoy })
+      .eq('id', currentUser.id);
+  }
+
+  const esDonante = jug.dona_videos === true;
+  const max = esDonante ? 10 : 5;
+  const restantes = Math.max(0, max - intentosHoy);
+
+  return { usados: intentosHoy, max, restantes, esDonante };
+}
+
+async function consumirIntento() {
+  if (!supabaseClient || !currentUser) return false;
+
+  const info = await verificarIntentos();
+  if (info.restantes <= 0) return false;
+
+  const hoy = fechaHoyArgentina();
+  await supabaseClient
+    .from('jugadoras')
+    .update({ intentos_hoy: info.usados + 1, fecha_intentos: hoy })
+    .eq('id', currentUser.id);
+
+  return true;
+}
+
+async function actualizarIntentosDisplay() {
+  const el = document.getElementById('intentos-display');
+  if (!el || !supabaseClient || !currentUser) return;
+
+  const info = await verificarIntentos();
+  if (info.esDonante) {
+    el.textContent = `Te quedan ${info.restantes} intentos hoy 🏆 (Donante IA)`;
+    el.style.color = 'rgba(255,214,0,0.75)';
+  } else {
+    el.textContent = `Te quedan ${info.restantes} intentos hoy`;
+    el.style.color = 'rgba(245,245,245,0.5)';
+  }
+}
+
+async function irAPrep() {
+  const info = await verificarIntentos();
+  if (info.restantes <= 0) {
+    const esMayor = currentProfile && currentProfile.fecha_nacimiento
+      ? calcularEdad(currentProfile.fecha_nacimiento) >= 18
+      : false;
+    const bloque = document.getElementById('sin-intentos-donante-bloque');
+    if (bloque) bloque.style.display = (!info.esDonante && esMayor) ? 'block' : 'none';
+    goTo('screen-sin-intentos');
+    return;
+  }
+  goTo('screen-prep');
+}
+
+async function mostrarDonanteEnPerfil() {
+  const bloque = document.getElementById('perfil-donante-bloque');
+  if (!bloque || !supabaseClient || !currentUser) return;
+
+  const { data: jug } = await supabaseClient
+    .from('jugadoras')
+    .select('dona_videos')
+    .eq('id', currentUser.id)
+    .maybeSingle();
+
+  const esDonante = jug && jug.dona_videos === true;
+  const esMayor = currentProfile && currentProfile.fecha_nacimiento
+    ? calcularEdad(currentProfile.fecha_nacimiento) >= 18
+    : false;
+
+  if (esDonante) {
+    bloque.innerHTML = `
+      <div style="
+        background: linear-gradient(135deg, rgba(255,214,0,0.08), rgba(255,214,0,0.04));
+        border: 1px solid rgba(255,214,0,0.35);
+        border-radius: 14px; padding: 18px 16px;
+        display: flex; flex-direction: column; align-items: center; gap: 8px; text-align: center;
+      ">
+        <div style="font-size:28px;">🏆</div>
+        <div style="font-family:'Bebas Neue',sans-serif; font-size:20px; color:#FFD600; letter-spacing:2px;">SOS DONANTE IA</div>
+        <div style="font-family:'Barlow',sans-serif; font-size:13px; color:rgba(245,245,245,0.7); line-height:1.5;">
+          Gracias por ayudar a entrenar nuestra IA.<br>Tenés intentos extra todos los días.
+        </div>
+      </div>`;
+  } else if (esMayor) {
+    bloque.innerHTML = `
+      <div style="
+        background: rgba(255,255,255,0.04);
+        border: 1px solid rgba(255,255,255,0.12);
+        border-radius: 14px; padding: 16px;
+        display: flex; flex-direction: column; gap: 10px;
+      ">
+        <div style="font-family:'Barlow Condensed',sans-serif; font-size:11px; letter-spacing:2px; color:rgba(245,245,245,0.5); font-weight:600;">INTENTOS EXTRA</div>
+        <div style="font-family:'Barlow',sans-serif; font-size:13px; color:rgba(245,245,245,0.7); line-height:1.5;">¿Querés más intentos diarios? Sumate como Donante IA y duplicalos.</div>
+        <button onclick="goTo('screen-consentimiento')" style="
+          background: var(--rojo); color: white; border: none; border-radius: 10px;
+          font-family: 'Bebas Neue', sans-serif; font-size: 17px; letter-spacing: 2px;
+          padding: 12px; cursor: pointer; width: 100%;
+        ">SUMATE COMO DONANTE IA</button>
+      </div>`;
+  } else if (currentProfile && currentProfile.fecha_nacimiento) {
+    bloque.innerHTML = `
+      <div style="
+        background: rgba(255,255,255,0.03);
+        border: 1px solid rgba(255,255,255,0.08);
+        border-radius: 14px; padding: 14px 16px;
+      ">
+        <div style="font-family:'Barlow',sans-serif; font-size:13px; color:rgba(245,245,245,0.5); line-height:1.5; text-align:center;">
+          Cuando seas mayor de 18 vas a poder sumarte al equipo Donante IA y duplicar tus intentos diarios.
+        </div>
+      </div>`;
+  } else {
+    bloque.innerHTML = '';
+  }
+}
+
 async function saveProfileSetup() {
   if (!currentUser) return;
 
@@ -2225,14 +2425,14 @@ function goTo(screenId) {
   currentScreen = screenId;
 
   // Screens without bottom nav (login, setup, active challenge, selfie, calibration)
-  const noNav = ['screen-challenge', 'screen-login', 'screen-profile-setup', 'screen-selfie', 'screen-calibrate', 'screen-consentimiento'];
+  const noNav = ['screen-challenge', 'screen-login', 'screen-profile-setup', 'screen-selfie', 'screen-calibrate', 'screen-consentimiento', 'screen-sin-intentos'];
   const navHidden = noNav.includes(screenId);
   document.getElementById('bottom-nav').classList.toggle('visible', !navHidden);
 
   if (screenId !== 'screen-challenge') stopCamera();
 
   // Keep the bottom-nav highlight in sync for the main screens
-  if (screenId === 'screen-inicio') updateNav('inicio');
+  if (screenId === 'screen-inicio') { updateNav('inicio'); actualizarIntentosDisplay(); }
 }
 
 async function goToRanking() {
@@ -2311,16 +2511,20 @@ async function loadRankingFromSupabase(nivel, offset) {
       return null;
     }
 
-    // Fetch names in a second query
+    // Fetch names and dona_videos in parallel second queries
     const ids = (data || []).map(r => r.jugadora_id).filter(Boolean);
     const namesMap = {};
+    const donantesSet = new Set();
     if (ids.length > 0) {
-      const { data: usuarios, error: uError } = await supabaseClient
-        .from('usuarios')
-        .select('id, nombre, apellido')
-        .in('id', ids);
-      if (!uError && usuarios) {
-        usuarios.forEach(u => { namesMap[u.id] = ((u.nombre || '') + ' ' + (u.apellido || '')).trim(); });
+      const [usuariosRes, jugadorasRes] = await Promise.all([
+        supabaseClient.from('usuarios').select('id, nombre, apellido').in('id', ids),
+        supabaseClient.from('jugadoras').select('id, dona_videos').in('id', ids)
+      ]);
+      if (!usuariosRes.error && usuariosRes.data) {
+        usuariosRes.data.forEach(u => { namesMap[u.id] = ((u.nombre || '') + ' ' + (u.apellido || '')).trim(); });
+      }
+      if (!jugadorasRes.error && jugadorasRes.data) {
+        jugadorasRes.data.forEach(j => { if (j.dona_videos === true) donantesSet.add(j.id); });
       }
     }
 
@@ -2330,7 +2534,8 @@ async function loadRankingFromSupabase(nivel, offset) {
       score:    r.mejor_t1_ochos || 0,
       nivel:    r.nivel,
       categoria: r.categoria_edad,
-      isMe:     r.jugadora_id === (currentUser && currentUser.id)
+      isMe:     r.jugadora_id === (currentUser && currentUser.id),
+      esDonante: donantesSet.has(r.jugadora_id)
     }));
   } catch (e) {
     console.error('Error en loadRankingFromSupabase:', e);
@@ -2447,6 +2652,7 @@ function goToPerfil() {
   loadProfileData();
   loadPlayerStats();
   mostrarNivelEnPerfil();
+  mostrarDonanteEnPerfil();
   goTo('screen-perfil');
   updateNav('perfil');
 }
@@ -2844,6 +3050,18 @@ function colorDistance(r1, g1, b1, r2, g2, b2) {
 }
 
 async function startChallenge() {
+  // Check daily attempt limit before opening camera
+  const intentosInfo = await verificarIntentos();
+  if (intentosInfo.restantes <= 0) {
+    const esMayor = currentProfile && currentProfile.fecha_nacimiento
+      ? calcularEdad(currentProfile.fecha_nacimiento) >= 18
+      : false;
+    const bloque = document.getElementById('sin-intentos-donante-bloque');
+    if (bloque) bloque.style.display = (!intentosInfo.esDonante && esMayor) ? 'block' : 'none';
+    goTo('screen-sin-intentos');
+    return;
+  }
+
   // Player name and country come from the user's saved profile
   if (currentProfile) {
     playerName = ((currentProfile.nombre || '') + ' ' + (currentProfile.apellido || '')).trim();
@@ -3725,6 +3943,9 @@ function playFinishSound() {
 //  COUNTDOWN & TIMER
 // ============================================================
 function beginCountdown() {
+  // Consume one attempt — only charged when user actually starts the countdown
+  consumirIntento().catch(e => console.warn('consumirIntento error:', e));
+
   // Unlock AudioContext on iOS — must happen inside a user gesture
   getAudioCtx();
   playBeep(440, 0.05, 'sine', 0.1); // silent unlock tap
@@ -4515,7 +4736,7 @@ function renderRanking(rows, myPos, append, offset) {
         <div class="rank-pos">${rankDisplay}</div>
         <div class="rank-avatar">${r.name.charAt(0).toUpperCase()}</div>
         <div class="rank-info">
-          <div class="rank-name">${r.name}${r.isMe ? ' 👈' : ''}</div>
+          <div class="rank-name">${r.esDonante ? '🏆 ' : ''}${r.name}${r.isMe ? ' 👈' : ''}</div>
           <div class="rank-detail">${r.country || ''}</div>
         </div>
         <div class="rank-score">${r.score}<span>OCHOS</span></div>
