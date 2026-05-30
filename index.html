@@ -1148,6 +1148,95 @@
     0%, 100% { transform: rotate(0deg); }
     50% { transform: rotate(90deg); }
   }
+
+  /* ===== SCREEN: CONSENTIMIENTO ===== */
+  #screen-consentimiento {
+    background: var(--negro);
+    align-items: center;
+    justify-content: center;
+    padding: 40px 28px;
+    position: relative;
+    overflow: hidden;
+  }
+  #screen-consentimiento::before {
+    content: '';
+    position: absolute;
+    width: 600px; height: 600px;
+    border-radius: 50%;
+    background: radial-gradient(circle, rgba(230,57,70,0.15) 0%, transparent 70%);
+    top: -150px; left: -100px;
+    pointer-events: none;
+  }
+  .consentimiento-card {
+    background: rgba(255,255,255,0.04);
+    border: 1px solid rgba(230,57,70,0.2);
+    border-radius: 20px;
+    padding: 32px 24px 28px;
+    max-width: 400px;
+    width: 100%;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 20px;
+  }
+  .consentimiento-emoji {
+    font-size: 56px;
+    line-height: 1;
+  }
+  .consentimiento-titulo {
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 28px;
+    letter-spacing: 2px;
+    color: var(--blanco);
+    text-align: center;
+    line-height: 1.1;
+  }
+  .consentimiento-texto {
+    font-family: 'Barlow', sans-serif;
+    font-size: 14px;
+    color: rgba(245,245,245,0.75);
+    line-height: 1.6;
+    text-align: left;
+  }
+  .consentimiento-texto strong {
+    color: var(--blanco);
+  }
+  .consentimiento-nota {
+    font-family: 'Barlow Condensed', sans-serif;
+    font-size: 12px;
+    letter-spacing: 1px;
+    color: rgba(245,245,245,0.45);
+    text-align: center;
+    font-weight: 600;
+  }
+  .btn-consentimiento-aceptar {
+    width: 100%;
+    padding: 16px;
+    background: var(--rojo);
+    color: white;
+    border: none;
+    border-radius: 12px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 20px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: background 0.2s;
+  }
+  .btn-consentimiento-aceptar:active { background: var(--rojo-dark); }
+  .btn-consentimiento-rechazar {
+    width: 100%;
+    padding: 15px;
+    background: transparent;
+    color: rgba(245,245,245,0.6);
+    border: 1px solid rgba(245,245,245,0.25);
+    border-radius: 12px;
+    font-family: 'Bebas Neue', sans-serif;
+    font-size: 18px;
+    letter-spacing: 2px;
+    cursor: pointer;
+    transition: border-color 0.2s;
+  }
+  .btn-consentimiento-rechazar:active { border-color: rgba(245,245,245,0.5); }
 </style>
 </head>
 <body>
@@ -1755,6 +1844,22 @@
 
 </div>
 
+<!-- ========== SCREEN: CONSENTIMIENTO ========== -->
+<div id="screen-consentimiento" class="screen">
+  <div class="consentimiento-card">
+    <div class="consentimiento-emoji">📹</div>
+    <div class="consentimiento-titulo">DONÁ TU VIDEO PARA AYUDAR</div>
+    <div class="consentimiento-texto">
+      HockeyVivo Challenge usa inteligencia artificial para detectar tu bocha. Para que la IA sea cada vez mejor, necesitamos videos reales de jugadores como vos.<br><br>
+      Si aceptás, tu video se guardará en nuestra base privada y se usará <strong>SOLO para entrenar la IA</strong>. No lo mostramos en redes, no lo compartimos con nadie, no aparece en perfiles públicos.<br><br>
+      Este sistema es temporal: cuando tengamos suficientes videos, lo desactivamos.
+    </div>
+    <div class="consentimiento-nota">DISPONIBLE SOLO PARA MAYORES DE 18 AÑOS</div>
+    <button class="btn-consentimiento-aceptar" onclick="aceptarConsentimiento()">ACEPTO Y CONTINÚO</button>
+    <button class="btn-consentimiento-rechazar" onclick="rechazarConsentimiento()">PREFIERO NO PARTICIPAR</button>
+  </div>
+</div>
+
 <!-- ========== BOTTOM NAV ========== -->
 <div class="bottom-nav" id="bottom-nav">
   <button class="nav-item active" id="nav-inicio" onclick="goTo('screen-inicio'); updateNav('inicio')">
@@ -1914,7 +2019,53 @@ async function loadOrPromptProfile() {
   playerName = (usuario.nombre + ' ' + usuario.apellido).trim();
   playerCountry = jugadora.pais;
 
-  // Go to main app
+  // Check consent before going to main app
+  const shownConsent = await checkConsentimiento();
+  if (!shownConsent) {
+    goTo('screen-inicio');
+    updateNav('inicio');
+  }
+}
+
+// ============================================================
+//  CONSENTIMIENTO DE DONACIÓN DE VIDEOS
+// ============================================================
+async function checkConsentimiento() {
+  if (!supabaseClient || !currentUser || !currentProfile) return false;
+
+  const bd = new Date(currentProfile.fecha_nacimiento);
+  const today = new Date();
+  let edad = today.getFullYear() - bd.getFullYear();
+  const m = today.getMonth() - bd.getMonth();
+  if (m < 0 || (m === 0 && today.getDate() < bd.getDate())) edad--;
+
+  const { data: jug } = await supabaseClient
+    .from('jugadoras')
+    .select('dona_videos, consentimiento_visto')
+    .eq('id', currentUser.id)
+    .maybeSingle();
+
+  if (edad >= 18 && jug && !jug.consentimiento_visto) {
+    goTo('screen-consentimiento');
+    return true;
+  }
+  return false;
+}
+
+async function aceptarConsentimiento() {
+  await supabaseClient.from('jugadoras').update({
+    dona_videos: true,
+    consentimiento_visto: true
+  }).eq('id', currentUser.id);
+  goTo('screen-inicio');
+  updateNav('inicio');
+}
+
+async function rechazarConsentimiento() {
+  await supabaseClient.from('jugadoras').update({
+    dona_videos: false,
+    consentimiento_visto: true
+  }).eq('id', currentUser.id);
   goTo('screen-inicio');
   updateNav('inicio');
 }
@@ -2074,7 +2225,7 @@ function goTo(screenId) {
   currentScreen = screenId;
 
   // Screens without bottom nav (login, setup, active challenge, selfie, calibration)
-  const noNav = ['screen-challenge', 'screen-login', 'screen-profile-setup', 'screen-selfie', 'screen-calibrate'];
+  const noNav = ['screen-challenge', 'screen-login', 'screen-profile-setup', 'screen-selfie', 'screen-calibrate', 'screen-consentimiento'];
   const navHidden = noNav.includes(screenId);
   document.getElementById('bottom-nav').classList.toggle('visible', !navHidden);
 
