@@ -2351,6 +2351,9 @@ let surfaceColor = 'verde';
 let stream = null;
 let timerInterval = null;
 let timeLeft = 60;
+let mediaRecorder = null;
+let recordedChunks = [];
+let isRecording = false;
 let eightCount = 0;
 let challengeActive = false;
 let resultSaved = false;  // guard: auto-save runs only once per challenge
@@ -3226,6 +3229,11 @@ function restartConeMarking() {
 }
 
 function stopCamera() {
+  if (isRecording && mediaRecorder) {
+    try { mediaRecorder.stop(); } catch (_) {}
+    isRecording = false;
+    recordedChunks = [];
+  }
   if (stream)     { stream.getTracks().forEach(t => t.stop()); stream = null; }
   if (animFrame)  { cancelAnimationFrame(animFrame); animFrame = null; }
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
@@ -3972,6 +3980,7 @@ function beginCountdown() {
       clearInterval(tick);
       overlay.classList.remove('active');
       numEl.style.color = '';
+      startVideoRecording().catch(e => console.warn('startVideoRecording error:', e));
       startTimer();
     } else {
       numEl.textContent = count;
@@ -4064,6 +4073,96 @@ function showResult() {
 }
 
 // ============================================================
+//  VIDEO RECORDING (silenciosa, solo para donantes)
+// ============================================================
+async function startVideoRecording() {
+  try {
+    if (!stream || !currentUser) return;
+
+    const { data: jug } = await supabaseClient
+      .from('jugadoras')
+      .select('dona_videos')
+      .eq('id', currentUser.id)
+      .maybeSingle();
+    if (!jug || jug.dona_videos !== true) return;
+
+    recordedChunks = [];
+
+    let mimeType = 'video/webm;codecs=vp9';
+    if (!MediaRecorder.isTypeSupported(mimeType)) {
+      mimeType = 'video/webm;codecs=vp8';
+      if (!MediaRecorder.isTypeSupported(mimeType)) {
+        mimeType = 'video/mp4';
+        if (!MediaRecorder.isTypeSupported(mimeType)) {
+          console.warn('No video codec supported, skipping recording');
+          return;
+        }
+      }
+    }
+
+    mediaRecorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: 1000000
+    });
+
+    mediaRecorder.ondataavailable = (e) => {
+      if (e.data.size > 0) recordedChunks.push(e.data);
+    };
+
+    mediaRecorder.start();
+    isRecording = true;
+    console.log('🎥 Grabando video del challenge...');
+  } catch (e) {
+    console.error('Error iniciando grabación:', e);
+  }
+}
+
+async function stopVideoRecordingAndUpload(resultadoTestId) {
+  if (!isRecording || !mediaRecorder) return;
+
+  return new Promise((resolve) => {
+    mediaRecorder.onstop = async () => {
+      isRecording = false;
+      try {
+        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
+        const ext = mediaRecorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const fileName = `${currentUser.id}/${Date.now()}.${ext}`;
+
+        console.log(`📤 Subiendo video (${(blob.size / 1024 / 1024).toFixed(2)} MB)...`);
+
+        const { error } = await supabaseClient.storage
+          .from('videos-entrenamiento')
+          .upload(fileName, blob, {
+            contentType: mediaRecorder.mimeType,
+            cacheControl: '3600'
+          });
+
+        if (error) {
+          console.error('Error subiendo video:', error);
+          resolve(null);
+          return;
+        }
+
+        if (resultadoTestId) {
+          await supabaseClient
+            .from('resultados_test')
+            .update({ video_url: fileName })
+            .eq('id', resultadoTestId);
+        }
+
+        console.log('✅ Video subido:', fileName);
+        recordedChunks = [];
+        resolve(fileName);
+      } catch (e) {
+        console.error('Error en upload:', e);
+        resolve(null);
+      }
+    };
+    mediaRecorder.stop();
+  });
+}
+
+// ============================================================
 //  SAVE RESULT TO SUPABASE (Fase B)
 // ============================================================
 async function saveResultToSupabase() {
@@ -4106,7 +4205,7 @@ async function saveResultToSupabase() {
       sospechoso: !!suspiciousFlag
     };
 
-    const { error: errResult } = await supabaseClient
+    const { data: resultado, error: errResult } = await supabaseClient
       .from('resultados_test')
       .insert({
         sesion_id: sesionId,
@@ -4116,12 +4215,19 @@ async function saveResultToSupabase() {
         resultado_principal: finalScore,
         estado: suspiciousFlag ? 'flagged_sospechoso' : 'valido',
         datos_calculados: datosCalculados
-      });
+      })
+      .select()
+      .single();
 
     console.log('Paso 2 resultados:', errResult);
     if (errResult) {
       console.error('Error guardando resultado:', errResult.message);
       return false;
+    }
+
+    // Upload video in background (no await — doesn't block UX)
+    if (resultado && resultado.id) {
+      stopVideoRecordingAndUpload(resultado.id);
     }
 
     // 3. Update public ranking (only if this is a new best for T1)
@@ -4699,6 +4805,11 @@ function closeSelfie() {
 
 function retryChallenge() {
   resultSaved = false;
+  if (isRecording && mediaRecorder) {
+    mediaRecorder.stop();
+    isRecording = false;
+    recordedChunks = [];
+  }
   // Fully stop camera and reset everything (fixes stretched video bug)
   stopCamera();
   if (videoEl) {
