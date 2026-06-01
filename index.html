@@ -334,20 +334,24 @@
     background: #000;
   }
 
-  #video {
-    width: 100%;
-    height: 100%;
-    object-fit: cover;
-  }
-
   #canvas-overlay {
     position: absolute;
     top: 0; left: 0;
     width: 100%; height: 100%;
     pointer-events: none;
+    z-index: 2;
+    /* object-fit is intentionally omitted on canvas: the canvas intrinsic size is
+       set to the exact video resolution in JS, so CSS width/height:100% stretches
+       it 1:1 to the container — same scaling as the video with object-fit:cover.
+       Using object-fit:cover on canvas would shift the visible drawing area. */
+  }
+
+  #video {
+    position: absolute;
+    top: 0; left: 0;
+    width: 100%; height: 100%;
     object-fit: cover;
-    /* Canvas uses object-fit:cover to match the video's cover scaling exactly,
-       keeping the drawn overlay aligned with the camera image. */
+    z-index: 1;
   }
 
   .challenge-ui {
@@ -356,6 +360,7 @@
     display: flex;
     flex-direction: column;
     pointer-events: none;
+    z-index: 3;
   }
 
   .challenge-top {
@@ -437,9 +442,9 @@
   .btn-start-small {
     background: linear-gradient(135deg, var(--rojo), var(--rojo-dark));
     color: white; border: none;
-    padding: 12px 32px; border-radius: 999px;
+    padding: 10px 24px; border-radius: 999px;
     font-family: 'Bebas Neue', sans-serif;
-    font-size: 18px; letter-spacing: 2px;
+    font-size: 16px; letter-spacing: 2px;
     cursor: pointer;
     box-shadow: 0 4px 16px rgba(230,57,70,0.4);
     transition: transform 0.15s;
@@ -3828,20 +3833,20 @@ function drawCones(W, H) {
     overlayCtx.save();
     // Outer ring
     overlayCtx.beginPath();
-    overlayCtx.arc(c.x, c.y, 22, 0, Math.PI*2);
+    overlayCtx.arc(c.x, c.y, 11, 0, Math.PI*2);
     overlayCtx.strokeStyle = '#FF6B00';
-    overlayCtx.lineWidth = 4;
+    overlayCtx.lineWidth = 2.5;
     overlayCtx.stroke();
     // Inner dot
     overlayCtx.beginPath();
-    overlayCtx.arc(c.x, c.y, 6, 0, Math.PI*2);
+    overlayCtx.arc(c.x, c.y, 3, 0, Math.PI*2);
     overlayCtx.fillStyle = '#FF6B00';
     overlayCtx.fill();
     // Label
-    overlayCtx.font = 'bold 14px sans-serif';
+    overlayCtx.font = 'bold 12px sans-serif';
     overlayCtx.fillStyle = '#FF9A00';
     overlayCtx.textAlign = 'center';
-    overlayCtx.fillText(c.label, c.x, c.y - 30);
+    overlayCtx.fillText(c.label, c.x, c.y - 16);
     overlayCtx.restore();
   });
 
