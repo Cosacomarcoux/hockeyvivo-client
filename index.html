@@ -4129,29 +4129,40 @@ async function startVideoRecording() {
 
 async function stopVideoRecordingAndUpload(resultadoTestId) {
   console.log('🟡 stopVideoRecordingAndUpload llamada — isRecording:', isRecording, '| mediaRecorder:', !!mediaRecorder, '| resultadoTestId:', resultadoTestId);
-  if (!isRecording || !mediaRecorder) return;
+
+  if (!isRecording || !mediaRecorder) {
+    console.log('🟡 No hay grabación activa, saliendo');
+    return;
+  }
 
   return new Promise((resolve) => {
-    mediaRecorder.onstop = async () => {
+    const recorder = mediaRecorder;
+    const handleStop = async () => {
       console.log('🟡 onstop disparado, chunks:', recordedChunks.length);
       isRecording = false;
+
+      if (recordedChunks.length === 0) {
+        console.log('🟡 No hay chunks grabados');
+        resolve(null);
+        return;
+      }
+
       try {
-        const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
-        const ext = mediaRecorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
+        const blob = new Blob(recordedChunks, { type: recorder.mimeType });
+        const ext = recorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
         const fileName = `${currentUser.id}/${Date.now()}.${ext}`;
 
         console.log('🟡 a punto de subir, tamaño:', blob.size, 'fileName:', fileName);
-        console.log(`📤 Subiendo video (${(blob.size / 1024 / 1024).toFixed(2)} MB)...`);
 
-        const { error } = await supabaseClient.storage
+        const { data, error } = await supabaseClient.storage
           .from('videos-entrenamiento')
           .upload(fileName, blob, {
-            contentType: mediaRecorder.mimeType,
+            contentType: recorder.mimeType,
             cacheControl: '3600'
           });
 
         if (error) {
-          console.error('Error subiendo video:', error);
+          console.error('❌ Error subiendo video:', error);
           resolve(null);
           return;
         }
@@ -4167,11 +4178,23 @@ async function stopVideoRecordingAndUpload(resultadoTestId) {
         recordedChunks = [];
         resolve(fileName);
       } catch (e) {
-        console.error('Error en upload:', e);
+        console.error('❌ Error en upload:', e);
         resolve(null);
       }
     };
-    mediaRecorder.stop();
+
+    recorder.addEventListener('stop', handleStop, { once: true });
+    recorder.stop();
+    console.log('🟡 mediaRecorder.stop() llamado, esperando evento stop...');
+
+    // Safety timeout: if stop never fires, bail out after 10 s
+    setTimeout(() => {
+      if (isRecording) {
+        console.error('❌ Timeout: evento stop nunca se disparó');
+        isRecording = false;
+        resolve(null);
+      }
+    }, 10000);
   });
 }
 
