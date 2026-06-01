@@ -4119,7 +4119,7 @@ async function startVideoRecording() {
       if (e.data.size > 0) recordedChunks.push(e.data);
     };
 
-    mediaRecorder.start();
+    mediaRecorder.start(1000); // fire ondataavailable every 1 s so chunks accumulate during recording
     isRecording = true;
     console.log('🎥 Grabando video del challenge...');
   } catch (e) {
@@ -4135,67 +4135,72 @@ async function stopVideoRecordingAndUpload(resultadoTestId) {
     return;
   }
 
-  return new Promise((resolve) => {
-    const recorder = mediaRecorder;
-    const handleStop = async () => {
-      console.log('🟡 onstop disparado, chunks:', recordedChunks.length);
-      isRecording = false;
+  const recorder = mediaRecorder;
+  const wasMimeType = recorder.mimeType;
 
-      if (recordedChunks.length === 0) {
-        console.log('🟡 No hay chunks grabados');
-        resolve(null);
-        return;
-      }
+  // Force delivery of any buffered data before stopping
+  try {
+    if (recorder.state === 'recording') {
+      recorder.requestData();
+      await new Promise(r => setTimeout(r, 200));
+    }
+  } catch (e) {
+    console.warn('🟡 requestData falló (no crítico):', e);
+  }
 
-      try {
-        const blob = new Blob(recordedChunks, { type: recorder.mimeType });
-        const ext = recorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
-        const fileName = `${currentUser.id}/${Date.now()}.${ext}`;
+  // Stop the recorder
+  try {
+    if (recorder.state !== 'inactive') {
+      recorder.stop();
+    }
+  } catch (e) {
+    console.warn('🟡 stop falló (no crítico):', e);
+  }
 
-        console.log('🟡 a punto de subir, tamaño:', blob.size, 'fileName:', fileName);
+  isRecording = false;
+  console.log('🟡 Recorder detenido. Chunks acumulados:', recordedChunks.length);
 
-        const { data, error } = await supabaseClient.storage
-          .from('videos-entrenamiento')
-          .upload(fileName, blob, {
-            contentType: recorder.mimeType,
-            cacheControl: '3600'
-          });
+  // Short wait to let the last ondataavailable fire
+  await new Promise(r => setTimeout(r, 300));
 
-        if (error) {
-          console.error('❌ Error subiendo video:', error);
-          resolve(null);
-          return;
-        }
+  if (recordedChunks.length === 0) {
+    console.error('❌ No hay chunks grabados, abortando upload');
+    return null;
+  }
 
-        if (resultadoTestId) {
-          await supabaseClient
-            .from('resultados_test')
-            .update({ video_url: fileName })
-            .eq('id', resultadoTestId);
-        }
+  try {
+    const blob = new Blob(recordedChunks, { type: wasMimeType });
+    const ext = wasMimeType.includes('mp4') ? 'mp4' : 'webm';
+    const fileName = `${currentUser.id}/${Date.now()}.${ext}`;
 
-        console.log('✅ Video subido:', fileName);
-        recordedChunks = [];
-        resolve(fileName);
-      } catch (e) {
-        console.error('❌ Error en upload:', e);
-        resolve(null);
-      }
-    };
+    console.log('🟡 a punto de subir, tamaño:', blob.size, 'fileName:', fileName);
 
-    recorder.addEventListener('stop', handleStop, { once: true });
-    recorder.stop();
-    console.log('🟡 mediaRecorder.stop() llamado, esperando evento stop...');
+    const { data, error } = await supabaseClient.storage
+      .from('videos-entrenamiento')
+      .upload(fileName, blob, {
+        contentType: wasMimeType,
+        cacheControl: '3600'
+      });
 
-    // Safety timeout: if stop never fires, bail out after 10 s
-    setTimeout(() => {
-      if (isRecording) {
-        console.error('❌ Timeout: evento stop nunca se disparó');
-        isRecording = false;
-        resolve(null);
-      }
-    }, 10000);
-  });
+    if (error) {
+      console.error('❌ Error subiendo video:', error);
+      return null;
+    }
+
+    if (resultadoTestId) {
+      await supabaseClient
+        .from('resultados_test')
+        .update({ video_url: fileName })
+        .eq('id', resultadoTestId);
+    }
+
+    console.log('✅ Video subido:', fileName);
+    recordedChunks = [];
+    return fileName;
+  } catch (e) {
+    console.error('❌ Error en upload:', e);
+    return null;
+  }
 }
 
 // ============================================================
