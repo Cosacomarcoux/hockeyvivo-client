@@ -3056,6 +3056,7 @@ async function startChallenge() {
   // Reset save guard immediately — before any async work — so a leftover
   // true from a previous challenge never blocks the new one.
   resultSaved = false;
+  console.log('🟢 Flag reseteado a false en startChallenge');
 
   // Check daily attempt limit before opening camera
   const intentosInfo = await verificarIntentos();
@@ -3954,6 +3955,8 @@ function playFinishSound() {
 //  COUNTDOWN & TIMER
 // ============================================================
 function beginCountdown() {
+  resultSaved = false;
+  console.log('🟢 Flag reseteado a false en beginCountdown');
   // Consume one attempt — only charged when user actually starts the countdown
   consumirIntento().catch(e => console.warn('consumirIntento error:', e));
 
@@ -4169,12 +4172,9 @@ async function stopVideoRecordingAndUpload(resultadoTestId) {
 //  SAVE RESULT TO SUPABASE (Fase B)
 // ============================================================
 async function saveResultToSupabase() {
-  console.log('🔵 saveResultToSupabase invocada - flag:', resultSaved, '| currentUser:', currentUser && currentUser.id, '| finalScore:', finalScore);
-  // Belt-and-suspenders guard: submitResult also checks this, but we double-check here
-  if (resultSaved) {
-    console.log('🔴 saveResultToSupabase: ya guardado, abortando duplicado');
-    return false;
-  }
+  console.log('🔵 saveResultToSupabase invocada - finalScore:', finalScore, '| currentUser:', currentUser && currentUser.id);
+  // Guard lives in submitResult (which sets resultSaved=true before calling here).
+  // Do NOT re-check resultSaved here — it is always true at this point by design.
   // Only save if user is logged in
   if (!supabaseClient || !currentUser) {
     console.log('No hay sesion - no se guarda en la nube');
@@ -4808,6 +4808,7 @@ function closeSelfie() {
 
 function retryChallenge() {
   resultSaved = false;
+  console.log('🟢 Flag reseteado a false en retryChallenge');
   if (isRecording && mediaRecorder) {
     mediaRecorder.stop();
     isRecording = false;
