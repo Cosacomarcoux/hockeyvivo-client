@@ -3233,11 +3233,10 @@ function restartConeMarking() {
 }
 
 function stopCamera() {
-  if (isRecording && mediaRecorder) {
-    try { mediaRecorder.stop(); } catch (_) {}
-    isRecording = false;
-    recordedChunks = [];
-  }
+  // NOTE: do NOT stop/clear the MediaRecorder here.
+  // stopVideoRecordingAndUpload() owns the recorder for the normal end-of-challenge
+  // upload flow; retryChallenge() owns it for the discard flow.
+  // Clearing it here would kill the chunks before the upload promise resolves.
   if (stream)     { stream.getTracks().forEach(t => t.stop()); stream = null; }
   if (animFrame)  { cancelAnimationFrame(animFrame); animFrame = null; }
   if (timerInterval) { clearInterval(timerInterval); timerInterval = null; }
@@ -4124,16 +4123,19 @@ async function startVideoRecording() {
 }
 
 async function stopVideoRecordingAndUpload(resultadoTestId) {
+  console.log('🟡 stopVideoRecordingAndUpload llamada — isRecording:', isRecording, '| mediaRecorder:', !!mediaRecorder, '| resultadoTestId:', resultadoTestId);
   if (!isRecording || !mediaRecorder) return;
 
   return new Promise((resolve) => {
     mediaRecorder.onstop = async () => {
+      console.log('🟡 onstop disparado, chunks:', recordedChunks.length);
       isRecording = false;
       try {
         const blob = new Blob(recordedChunks, { type: mediaRecorder.mimeType });
         const ext = mediaRecorder.mimeType.includes('mp4') ? 'mp4' : 'webm';
         const fileName = `${currentUser.id}/${Date.now()}.${ext}`;
 
+        console.log('🟡 a punto de subir, tamaño:', blob.size, 'fileName:', fileName);
         console.log(`📤 Subiendo video (${(blob.size / 1024 / 1024).toFixed(2)} MB)...`);
 
         const { error } = await supabaseClient.storage
