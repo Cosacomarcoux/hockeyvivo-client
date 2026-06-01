@@ -3053,6 +3053,10 @@ function colorDistance(r1, g1, b1, r2, g2, b2) {
 }
 
 async function startChallenge() {
+  // Reset save guard immediately — before any async work — so a leftover
+  // true from a previous challenge never blocks the new one.
+  resultSaved = false;
+
   // Check daily attempt limit before opening camera
   const intentosInfo = await verificarIntentos();
   if (intentosInfo.restantes <= 0) {
@@ -3084,7 +3088,6 @@ async function startChallenge() {
   coneB = null;
   conesMarked = false;
   coneMarkingStep = 0;
-  resultSaved = false;  // reset save guard for every new challenge
   resetEightState();
 
   document.getElementById('counter-display').textContent = '0';
