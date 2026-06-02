@@ -1685,15 +1685,11 @@
           <!-- Red accent line -->
           <div style="height:2px; background:linear-gradient(90deg,#E63946,transparent); margin:14px 0 12px; width:60%;"></div>
 
-          <!-- Stats grid (Strava-style) -->
-          <div style="display:grid; grid-template-columns:1fr 1fr 1fr; gap:8px;">
+          <!-- Stats grid (2 cols: nivel + ranking) -->
+          <div style="display:grid; grid-template-columns:1fr 1fr; gap:8px;">
             <div>
-              <div id="selfie-stat-pace" style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:white; line-height:1;">0.0</div>
-              <div style="font-family:'Barlow Condensed',sans-serif; font-size:9px; letter-spacing:1.5px; color:rgba(255,255,255,0.5); margin-top:3px; font-weight:600;">OCHOS/SEG</div>
-            </div>
-            <div>
-              <div id="selfie-stat-best" style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:white; line-height:1;">--</div>
-              <div style="font-family:'Barlow Condensed',sans-serif; font-size:9px; letter-spacing:1.5px; color:rgba(255,255,255,0.5); margin-top:3px; font-weight:600;">MEJOR (s)</div>
+              <div id="selfie-stat-nivel" style="font-family:'Bebas Neue',sans-serif; font-size:18px; color:white; line-height:1;">--</div>
+              <div style="font-family:'Barlow Condensed',sans-serif; font-size:9px; letter-spacing:1.5px; color:rgba(255,255,255,0.5); margin-top:3px; font-weight:600;">NIVEL</div>
             </div>
             <div>
               <div id="selfie-stat-rank" style="font-family:'Bebas Neue',sans-serif; font-size:22px; color:#E63946; line-height:1;">#--</div>
@@ -4263,9 +4259,18 @@ async function saveResultToSupabase() {
       return false;
     }
 
-    // Upload video in background (no await — doesn't block UX)
+    // Upload video in background only if >= 5 ochos (filters failed detections)
     if (resultado && resultado.id) {
-      stopVideoRecordingAndUpload(resultado.id);
+      if (finalScore >= 5) {
+        stopVideoRecordingAndUpload(resultado.id);
+      } else {
+        console.log('🟡 Video no se sube: menos de 5 ochos (' + finalScore + ')');
+        if (isRecording && mediaRecorder) {
+          try { if (mediaRecorder.state !== 'inactive') mediaRecorder.stop(); } catch(e) {}
+          isRecording = false;
+          recordedChunks = [];
+        }
+      }
     }
 
     // 3. Update public ranking (only if this is a new best for T1)
@@ -4488,19 +4493,10 @@ async function shareResult() {
   document.getElementById('selfie-player-name').textContent = (playerName || 'Jugador').toUpperCase();
   document.getElementById('selfie-country').textContent = (playerCountry || 'Argentina').toUpperCase();
 
-  // Compute stats
-  const pace = (finalScore / 60).toFixed(2);  // ochos/segundo
-  document.getElementById('selfie-stat-pace').textContent = pace;
-
-  // Best (fastest) 8 in seconds — min interval between counts
-  let bestTime = '--';
-  if (speedSamples.length > 0) {
-    const validSamples = speedSamples.filter(s => s > 0 && s < 30000);
-    if (validSamples.length > 0) {
-      bestTime = (Math.min(...validSamples) / 1000).toFixed(2);
-    }
-  }
-  document.getElementById('selfie-stat-best').textContent = bestTime;
+  // Nivel / subnivel
+  const nivelActual = (currentProfile && currentProfile.nivel) || 'INICIADO';
+  const subnivel = (currentProfile && currentProfile.subnivel) || 1;
+  document.getElementById('selfie-stat-nivel').textContent = nivelActual + ' ' + subnivel;
 
   // Ranking position
   const allScores = [...rankingData.map(r => r.score), finalScore].sort((a,b) => b-a);
@@ -4725,17 +4721,11 @@ function drawSelfieOverlay(ctx, W, H) {
   ctx.lineTo(700, bottomY + 360);
   ctx.stroke();
 
-  // === STATS GRID (3 columns) ===
+  // === STATS GRID (2 columns: nivel + ranking) ===
   const statY = bottomY + 410;
-  const statColW = (W - 120) / 3;
+  const statColW = (W - 120) / 2;
 
-  // Compute stats
-  const pace = (finalScore / 60).toFixed(2);
-  let bestTime = '--';
-  if (typeof speedSamples !== 'undefined' && speedSamples.length > 0) {
-    const valid = speedSamples.filter(s => s > 0 && s < 30000);
-    if (valid.length > 0) bestTime = (Math.min(...valid) / 1000).toFixed(2);
-  }
+  const nivelStr = ((currentProfile && currentProfile.nivel) || 'INICIADO') + ' ' + ((currentProfile && currentProfile.subnivel) || 1);
   let rankPos = '--';
   try {
     const allScores = [...rankingData.map(r => r.score), finalScore].sort((a,b) => b-a);
@@ -4743,15 +4733,14 @@ function drawSelfieOverlay(ctx, W, H) {
   } catch(e) {}
 
   const stats = [
-    { value: pace, label: 'OCHOS / SEG', color: '#FFFFFF' },
-    { value: bestTime, label: 'MEJOR (SEG)', color: '#FFFFFF' },
-    { value: rankPos, label: 'RANKING', color: '#E63946' },
+    { value: nivelStr, label: 'NIVEL', color: '#FFFFFF' },
+    { value: rankPos,  label: 'RANKING', color: '#E63946' },
   ];
 
   stats.forEach((s, i) => {
     const x = 60 + i * statColW;
     ctx.fillStyle = s.color;
-    ctx.font = '700 64px "Bebas Neue", "Arial Black", sans-serif';
+    ctx.font = '700 56px "Bebas Neue", "Arial Black", sans-serif';
     ctx.textAlign = 'left';
     ctx.fillText(s.value, x, statY);
     ctx.fillStyle = 'rgba(255,255,255,0.5)';
