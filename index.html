@@ -1332,16 +1332,6 @@
       </div>
     </div>
 
-    <div class="profile-field">
-      <label>Tu nivel</label>
-      <select id="setup-nivel">
-        <option value="INICIADO">Iniciado - Recién empiezo</option>
-        <option value="INTERMEDIO">Intermedio - Tengo experiencia</option>
-        <option value="AVANZADO">Avanzado - Compito regularmente</option>
-        <option value="ELITE">Elite - Alto rendimiento</option>
-      </select>
-    </div>
-
     <button class="btn-primary" onclick="saveProfileSetup()" style="margin-top: 12px;">
       Guardar y empezar
     </button>
@@ -2280,12 +2270,19 @@ async function saveProfileSetup() {
   const cumple = document.getElementById('setup-cumple').value;
   const pais = document.getElementById('setup-pais').value;
   const provincia = document.getElementById('setup-provincia').value.trim();
-  const nivel = document.getElementById('setup-nivel').value;
 
   if (!nombre || !apellido || !cumple || !provincia) {
     alert('Completá todos los campos por favor.');
     return;
   }
+
+  // Detect whether this is a brand-new user (no jugadora row yet)
+  const { data: jugExistente } = await supabaseClient
+    .from('jugadoras')
+    .select('id, bienvenida_vista')
+    .eq('id', currentUser.id)
+    .maybeSingle();
+  const esUsuarioNuevo = !jugExistente;
 
   // Insert/update usuarios
   const { error: errUsuario } = await supabaseClient
@@ -2305,7 +2302,8 @@ async function saveProfileSetup() {
     return;
   }
 
-  // Insert jugadoras
+  // Upsert jugadoras — nivel always INICIADO for new users, preserved for edits
+  const nivelGuardar = esUsuarioNuevo ? 'INICIADO' : (jugExistente.nivel || 'INICIADO');
   const { error: errJugadora } = await supabaseClient
     .from('jugadoras')
     .upsert({
@@ -2313,7 +2311,8 @@ async function saveProfileSetup() {
       fecha_nacimiento: cumple,
       pais: pais,
       provincia: provincia,
-      nivel: nivel
+      nivel: nivelGuardar,
+      ...(esUsuarioNuevo ? { subnivel: 1, repeticiones_umbral: 0, bienvenida_vista: false } : {})
     });
 
   if (errJugadora) {
@@ -2322,8 +2321,27 @@ async function saveProfileSetup() {
     return;
   }
 
-  // Reload profile and go to main app
+  // Load profile into memory before showing welcome modal
   await loadOrPromptProfile();
+
+  // Show welcome modal only for new users (bienvenida_vista was false / didn't exist)
+  if (esUsuarioNuevo) {
+    mostrarModal(
+      '🌱',
+      '¡BIENVENIDO/A A HOCKEYVIVO!',
+      `<strong>Empezás en el nivel INICIADO.</strong><br><br>
+En HockeyVivo, tu nivel no se elige — se gana. A medida que vayas jugando challenges y mejorando, vas a subir de subnivel y de nivel hasta llegar a tu nivel real.<br><br>
+Esto hace que cada nivel del ranking sea justo: competís contra jugadores de tu mismo nivel.<br><br>
+🎯 <strong>Tu primer objetivo:</strong> hacer 20 ochos en un challenge para subir a INTERMEDIO.<br><br>
+¡A jugar!`,
+      'ENTENDIDO, A JUGAR'
+    );
+    // Mark welcome as seen
+    await supabaseClient
+      .from('jugadoras')
+      .update({ bienvenida_vista: true })
+      .eq('id', currentUser.id);
+  }
 }
 
 // Start initialization when page loads
@@ -2844,7 +2862,6 @@ function editProfile() {
   document.getElementById('setup-cumple').value = currentProfile.fecha_nacimiento || '';
   document.getElementById('setup-pais').value = currentProfile.pais || 'Argentina';
   document.getElementById('setup-provincia').value = currentProfile.provincia || '';
-  document.getElementById('setup-nivel').value = currentProfile.nivel || 'INICIADO';
   goTo('screen-profile-setup');
 }
 
