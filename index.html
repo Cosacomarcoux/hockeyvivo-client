@@ -1144,6 +1144,44 @@
     border-color: #E63946;
   }
   .profile-row { display: grid; grid-template-columns: 1fr 1fr; gap: 12px; }
+  .genero-field { display: flex; flex-direction: column; gap: 8px; }
+  .genero-field label {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 11px;
+    letter-spacing: 2px; color: rgba(245,245,245,0.55);
+    text-transform: uppercase; font-weight: 600;
+  }
+  .genero-btns { display: grid; grid-template-columns: 1fr 1fr; gap: 10px; }
+  .btn-genero {
+    padding: 16px 8px;
+    background: rgba(255,255,255,0.05);
+    border: 2px solid rgba(230,57,70,0.3);
+    border-radius: 10px; color: rgba(245,245,245,0.7);
+    font-family: 'Bebas Neue', sans-serif; font-size: 20px;
+    letter-spacing: 1px; cursor: pointer; transition: all 0.18s;
+  }
+  .btn-genero.selected {
+    border-color: #E63946; background: rgba(230,57,70,0.18);
+    color: #F5F5F5;
+  }
+  /* ===== SCREEN: GENERO ===== */
+  #screen-genero {
+    background: linear-gradient(180deg, #0A0A0A 0%, #1A0508 100%);
+    min-height: 100vh; min-height: 100svh;
+    display: none; flex-direction: column;
+    align-items: center; justify-content: center;
+    padding: 32px 24px; text-align: center;
+  }
+  #screen-genero.active { display: flex; }
+  .genero-screen-wrapper { max-width: 340px; display: flex; flex-direction: column; gap: 24px; }
+  .genero-screen-emoji { font-size: 56px; }
+  .genero-screen-title {
+    font-family: 'Bebas Neue', sans-serif; font-size: 32px;
+    color: #F5F5F5; letter-spacing: 1px; line-height: 1;
+  }
+  .genero-screen-sub {
+    font-family: 'Barlow Condensed', sans-serif; font-size: 15px;
+    color: rgba(245,245,245,0.65); line-height: 1.5;
+  }
   .logout-btn {
     background: none; border: none; color: rgba(245,245,245,0.5);
     font-family: 'Barlow Condensed', sans-serif; font-size: 12px;
@@ -1332,8 +1370,32 @@
       </div>
     </div>
 
+    <div class="genero-field">
+      <label>¿Sos jugador o jugadora?</label>
+      <div class="genero-btns">
+        <button class="btn-genero" id="btn-genero-m" onclick="selectGenero('M')">JUGADOR</button>
+        <button class="btn-genero" id="btn-genero-f" onclick="selectGenero('F')">JUGADORA</button>
+      </div>
+    </div>
+
     <button class="btn-primary" onclick="saveProfileSetup()" style="margin-top: 12px;">
       Guardar y empezar
+    </button>
+  </div>
+</div>
+
+<!-- ========== SCREEN 0c: GENERO (usuarios existentes sin género) ========== -->
+<div id="screen-genero" class="screen">
+  <div class="genero-screen-wrapper">
+    <div class="genero-screen-emoji">👤</div>
+    <div class="genero-screen-title">COMPLETÁ TU PERFIL</div>
+    <div class="genero-screen-sub">Antes de seguir, contanos: ¿sos jugador o jugadora?</div>
+    <div class="genero-btns" style="margin-top: 8px;">
+      <button class="btn-genero" id="btn-genero-existing-m" onclick="selectGeneroExisting('M')">JUGADOR</button>
+      <button class="btn-genero" id="btn-genero-existing-f" onclick="selectGeneroExisting('F')">JUGADORA</button>
+    </div>
+    <button class="btn-primary" onclick="saveGeneroExisting()" style="margin-top: 4px;">
+      CONTINUAR
     </button>
   </div>
 </div>
@@ -1936,6 +1998,8 @@ const SUPABASE_ANON_KEY = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBh
 let supabaseClient = null;
 let currentUser = null;
 let currentProfile = null;
+let selectedGenero = null;       // 'M' | 'F' — set during profile setup or genero screen
+let selectedGeneroExisting = null; // same for existing-user genero screen
 
 async function initSupabase() {
   if (!window.supabase) {
@@ -2035,6 +2099,9 @@ async function loadOrPromptProfile() {
     const parts = googleName.split(' ');
     if (parts.length > 0) document.getElementById('setup-nombre').value = parts[0];
     if (parts.length > 1) document.getElementById('setup-apellido').value = parts.slice(1).join(' ');
+    selectedGenero = null;
+    document.getElementById('btn-genero-m').classList.remove('selected');
+    document.getElementById('btn-genero-f').classList.remove('selected');
     goTo('screen-profile-setup');
     return;
   }
@@ -2052,6 +2119,9 @@ async function loadOrPromptProfile() {
     document.getElementById('setup-subtitle').textContent = 'Solo la primera vez. Para subir al ranking necesitamos algunos datos.';
     document.getElementById('setup-nombre').value = usuario.nombre || '';
     document.getElementById('setup-apellido').value = usuario.apellido || '';
+    selectedGenero = null;
+    document.getElementById('btn-genero-m').classList.remove('selected');
+    document.getElementById('btn-genero-f').classList.remove('selected');
     goTo('screen-profile-setup');
     return;
   }
@@ -2060,6 +2130,10 @@ async function loadOrPromptProfile() {
   // Apply to legacy vars so existing app code works
   playerName = (usuario.nombre + ' ' + usuario.apellido).trim();
   playerCountry = jugadora.pais;
+
+  // Block on gender screen if not yet set (existing users)
+  const needsGenero = await checkGenero();
+  if (needsGenero) return;
 
   // Check consent before going to main app
   const shownConsent = await checkConsentimiento();
@@ -2262,6 +2336,66 @@ async function mostrarDonanteEnPerfil() {
   }
 }
 
+function selectGenero(genero) {
+  selectedGenero = genero;
+  document.getElementById('btn-genero-m').classList.toggle('selected', genero === 'M');
+  document.getElementById('btn-genero-f').classList.toggle('selected', genero === 'F');
+}
+
+function selectGeneroExisting(genero) {
+  selectedGeneroExisting = genero;
+  document.getElementById('btn-genero-existing-m').classList.toggle('selected', genero === 'M');
+  document.getElementById('btn-genero-existing-f').classList.toggle('selected', genero === 'F');
+}
+
+async function saveGeneroExisting() {
+  if (!selectedGeneroExisting) {
+    alert('Seleccioná si sos jugador o jugadora para continuar.');
+    return;
+  }
+  if (!currentUser) return;
+  const { error } = await supabaseClient
+    .from('jugadoras')
+    .update({ genero: selectedGeneroExisting, genero_visto: true })
+    .eq('id', currentUser.id);
+  if (error) {
+    alert('Error guardando género: ' + error.message);
+    return;
+  }
+  if (currentProfile) {
+    currentProfile.genero = selectedGeneroExisting;
+    currentProfile.genero_visto = true;
+  }
+  // Continue normal flow
+  const shownConsent = await checkConsentimiento();
+  if (!shownConsent) {
+    goTo('screen-inicio');
+    updateNav('inicio');
+  }
+}
+
+async function checkGenero() {
+  if (!supabaseClient || !currentUser || !currentProfile) return false;
+
+  const { data: jug } = await supabaseClient
+    .from('jugadoras')
+    .select('genero, genero_visto')
+    .eq('id', currentUser.id)
+    .maybeSingle();
+
+  if (jug && (!jug.genero || !jug.genero_visto)) {
+    // Reset state in case user comes back to this screen
+    selectedGeneroExisting = null;
+    const mBtn = document.getElementById('btn-genero-existing-m');
+    const fBtn = document.getElementById('btn-genero-existing-f');
+    if (mBtn) mBtn.classList.remove('selected');
+    if (fBtn) fBtn.classList.remove('selected');
+    goTo('screen-genero');
+    return true;
+  }
+  return false;
+}
+
 async function saveProfileSetup() {
   if (!currentUser) return;
 
@@ -2273,6 +2407,10 @@ async function saveProfileSetup() {
 
   if (!nombre || !apellido || !cumple || !provincia) {
     alert('Completá todos los campos por favor.');
+    return;
+  }
+  if (!selectedGenero) {
+    alert('Seleccioná si sos jugador o jugadora.');
     return;
   }
 
@@ -2312,6 +2450,8 @@ async function saveProfileSetup() {
       pais: pais,
       provincia: provincia,
       nivel: nivelGuardar,
+      genero: selectedGenero,
+      genero_visto: true,
       ...(esUsuarioNuevo ? { subnivel: 1, repeticiones_umbral: 0, bienvenida_vista: false } : {})
     });
 
@@ -2566,15 +2706,19 @@ async function loadRankingFromSupabase(nivel, offset) {
       }
     }
 
-    return (data || []).map(r => ({
-      name:     namesMap[r.jugadora_id] || 'Jugadora',
+    return (data || []).map(r => {
+      const nombre = namesMap[r.jugadora_id] || '';
+      console.log('Ranking row:', r.jugadora_id, '|', nombre || '(sin nombre)');
+      return {
+      name:     nombre || 'Sin nombre',
       country:  r.pais || '',
       score:    r.mejor_t1_ochos || 0,
       nivel:    r.nivel,
       categoria: r.categoria_edad,
       isMe:     r.jugadora_id === (currentUser && currentUser.id),
       esDonante: donantesSet.has(r.jugadora_id)
-    }));
+    };
+    });
   } catch (e) {
     console.error('Error en loadRankingFromSupabase:', e);
     return null;
@@ -2862,6 +3006,11 @@ function editProfile() {
   document.getElementById('setup-cumple').value = currentProfile.fecha_nacimiento || '';
   document.getElementById('setup-pais').value = currentProfile.pais || 'Argentina';
   document.getElementById('setup-provincia').value = currentProfile.provincia || '';
+  // Pre-select existing gender
+  const g = currentProfile.genero || null;
+  selectedGenero = g;
+  document.getElementById('btn-genero-m').classList.toggle('selected', g === 'M');
+  document.getElementById('btn-genero-f').classList.toggle('selected', g === 'F');
   goTo('screen-profile-setup');
 }
 
