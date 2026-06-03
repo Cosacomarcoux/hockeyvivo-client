@@ -2334,8 +2334,23 @@ function checkOrientation() {
   const challengeActive = challengeScreen && challengeScreen.classList.contains('active');
   overlay.style.display = (isPortrait && challengeActive) ? 'flex' : 'none';
 }
-window.addEventListener('resize', checkOrientation);
-window.addEventListener('orientationchange', checkOrientation);
+// Sync canvas intrinsic dimensions to the current video resolution.
+// Must be called after rotation so the coordinate mapping stays accurate.
+function updateCanvasDimensions() {
+  if (!overlayCanvas || !videoEl || videoEl.videoWidth === 0) return;
+  overlayCanvas.width  = videoEl.videoWidth;
+  overlayCanvas.height = videoEl.videoHeight;
+}
+
+window.addEventListener('resize', () => {
+  checkOrientation();
+  updateCanvasDimensions();
+});
+window.addEventListener('orientationchange', () => {
+  checkOrientation();
+  // Delay to let the browser finish rotating before reading new dimensions
+  setTimeout(updateCanvasDimensions, 300);
+});
 
 window.addEventListener('load', () => {
   // Set the logo on login screen
@@ -3133,6 +3148,9 @@ async function startChallenge() {
         // Set canvas to actual video resolution (fixes stretch bug)
         overlayCanvas.width  = videoEl.videoWidth;
         overlayCanvas.height = videoEl.videoHeight;
+        // Ensure dimensions are fresh (handles the case where the challenge
+        // is restarted after a previous orientation change)
+        updateCanvasDimensions();
 
         // Wait for model to be ready
         await modelPromise;
@@ -3175,8 +3193,9 @@ function screenToVideoCoords(clientX, clientY) {
   const rect = overlayCanvas.getBoundingClientRect();
   const dispW = rect.width;
   const dispH = rect.height;
-  const vidW = overlayCanvas.width;   // intrinsic resolution (= video resolution)
-  const vidH = overlayCanvas.height;
+  // Always read live video dimensions — avoids stale values after rotation
+  const vidW = (videoEl && videoEl.videoWidth)  || overlayCanvas.width;
+  const vidH = (videoEl && videoEl.videoHeight) || overlayCanvas.height;
 
   // object-fit: cover scale = max ratio so the image fills the box
   const scale = Math.max(dispW / vidW, dispH / vidH);
@@ -3295,6 +3314,10 @@ function startDetectionLoop() {
 
     // Pause everything if the page/tab is hidden (saves battery when minimized)
     if (document.hidden) return;
+
+    // Pause detection when portrait — the rotate overlay already covers the screen,
+    // and running inference on a rotated/resizing layout causes coordinate drift.
+    if (window.innerHeight > window.innerWidth) return;
 
     if (!videoEl || videoEl.readyState < 2 || !overlayCanvas || overlayCanvas.width === 0) return;
 
