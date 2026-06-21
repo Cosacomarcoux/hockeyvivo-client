@@ -2226,7 +2226,9 @@ async function verificarIntentos() {
   }
 
   const esDonante = jug.dona_videos === true;
-  const max = esDonante ? 10 : 5;
+  // TODO: volver a 10/5 después del período de lanzamiento (junio 2026)
+  // Límites temporales aumentados durante el lanzamiento
+  const max = esDonante ? 50 : 50;
   const restantes = Math.max(0, max - intentosHoy);
 
   return { usados: intentosHoy, max, restantes, esDonante };
