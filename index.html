@@ -3495,31 +3495,26 @@ function startDetectionLoop() {
   // This dramatically reduces battery use and heat with no visible loss.
   const DETECTION_INTERVAL_MS = 83; // ms (~12 fps de detección)
 
-  // Small canvas for low-resolution inference (saves CPU/GPU on low-end devices)
-  const inferCanvas = document.createElement('canvas');
-  inferCanvas.width = 480;
-  inferCanvas.height = 270;
-  const inferCtx = inferCanvas.getContext('2d');
+  // Hidden canvas used ONLY to feed the AI model at reduced resolution.
+  // Never appended to the DOM — the <video> element keeps its native resolution.
+  const modelCanvas = document.createElement('canvas');
+  modelCanvas.width = 320;
+  modelCanvas.height = 240;
+  const modelCtx = modelCanvas.getContext('2d');
 
   async function runInference() {
     if (inferring || !cocoModel || !videoEl) return;
     if (videoEl.readyState < 2) return;
     inferring = true;
     try {
-      // Draw video into small canvas to reduce AI processing resolution
-      const vW = videoEl.videoWidth || 480;
-      const vH = videoEl.videoHeight || 270;
-      const scale = Math.min(320 / vW, 240 / vH);
-      const dw = Math.round(vW * scale);
-      const dh = Math.round(vH * scale);
-      inferCanvas.width = dw;
-      inferCanvas.height = dh;
-      inferCtx.drawImage(videoEl, 0, 0, dw, dh);
-      const predictions = await cocoModel.detect(inferCanvas, 10, 0.15);
+      // Draw the video frame into the fixed 320x240 model canvas.
+      // The <video> element itself is NOT touched — it stays at native resolution.
+      modelCtx.drawImage(videoEl, 0, 0, 320, 240);
+      const predictions = await cocoModel.detect(modelCanvas, 10, 0.15);
 
-      // Scale bboxes back to video coordinate space
-      const scaleX = vW / dw;
-      const scaleY = vH / dh;
+      // Scale bboxes from model-canvas space (320x240) back to native video space
+      const scaleX = videoEl.videoWidth / 320;
+      const scaleY = videoEl.videoHeight / 240;
       predictions.forEach(p => {
         p.bbox[0] *= scaleX;
         p.bbox[1] *= scaleY;
