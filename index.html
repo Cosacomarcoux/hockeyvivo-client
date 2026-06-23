@@ -3093,7 +3093,7 @@ async function loadModel() {
   const isLowEnd = isAndroid && cpuCores < 6;
 
   if (isLowEnd) {
-    console.warn('⚠️ Dispositivo posiblemente lento, modo optimizado activado');
+    console.warn('⚠️ Dispositivo de gama baja detectado');
     // Show toast after a short delay so the UI is ready
     setTimeout(() => {
       const toast = document.getElementById('low-end-toast');
@@ -3493,7 +3493,7 @@ function startDetectionLoop() {
   })();
   // Throttle inference to ~15 times per second instead of every frame.
   // This dramatically reduces battery use and heat with no visible loss.
-  const DETECTION_INTERVAL_MS = 66; // ms (~15 fps de detección)
+  const DETECTION_INTERVAL_MS = 83; // ms (~12 fps de detección)
 
   // Small canvas for low-resolution inference (saves CPU/GPU on low-end devices)
   const inferCanvas = document.createElement('canvas');
@@ -3509,7 +3509,7 @@ function startDetectionLoop() {
       // Draw video into small canvas to reduce AI processing resolution
       const vW = videoEl.videoWidth || 480;
       const vH = videoEl.videoHeight || 270;
-      const scale = Math.min(480 / vW, 270 / vH);
+      const scale = Math.min(320 / vW, 240 / vH);
       const dw = Math.round(vW * scale);
       const dh = Math.round(vH * scale);
       inferCanvas.width = dw;
