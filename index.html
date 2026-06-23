@@ -1520,6 +1520,13 @@
   </div>
 </div>
 
+<!-- ========== LOW-END DEVICE TOAST ========== -->
+<div id="low-end-toast" style="display:none; position:fixed; bottom:80px; left:50%; transform:translateX(-50%); z-index:9998; background:rgba(20,20,20,0.92); color:#fff; border:1px solid rgba(230,57,70,0.6); border-radius:12px; padding:12px 18px; max-width:320px; font-family:'Barlow Condensed',sans-serif; font-size:15px; text-align:center; line-height:1.4;">
+  <div style="font-size:20px; margin-bottom:4px;">⚠️ Dispositivo lento detectado</div>
+  <div style="color:rgba(255,255,255,0.8);">La app usará modo optimizado. Para mejor rendimiento: cerrá otras apps y asegurate de tener buena iluminación.</div>
+  <button onclick="document.getElementById('low-end-toast').style.display='none'" style="margin-top:8px; background:rgba(230,57,70,0.7); border:none; border-radius:8px; color:#fff; font-family:'Barlow Condensed',sans-serif; font-size:14px; padding:4px 16px; cursor:pointer;">Entendido</button>
+</div>
+
 <!-- ========== SCREEN 3: CHALLENGE ========== -->
 <div id="screen-challenge" class="screen">
   <div id="rotate-overlay" style="display:none; position:fixed; top:0; left:0; width:100vw; height:100vh; background:#0a0a0a; z-index:9999; flex-direction:column; align-items:center; justify-content:center; color:#fff; text-align:center; padding:32px;">
@@ -3072,6 +3079,24 @@ async function loadModel() {
 }
 
 // ============================================================
+//  LOW-END DEVICE DETECTION
+// ============================================================
+(function detectLowEndDevice() {
+  const isAndroid = /android/i.test(navigator.userAgent);
+  const cpuCores = navigator.hardwareConcurrency || 4;
+  const isLowEnd = isAndroid && cpuCores < 6;
+
+  if (isLowEnd) {
+    console.warn('⚠️ Dispositivo posiblemente lento, modo optimizado activado');
+    // Show toast after a short delay so the UI is ready
+    setTimeout(() => {
+      const toast = document.getElementById('low-end-toast');
+      if (toast) toast.style.display = 'block';
+    }, 3000);
+  }
+})();
+
+// ============================================================
 //  CAMERA
 // ============================================================
 // ============================================================
@@ -3448,17 +3473,41 @@ function startDetectionLoop() {
   let inferring = false;
   let lastInferenceTime = 0;
   let ballHistory = [];       // vector queue: last 5 ball positions for prediction
-  // Throttle inference to ~12 times per second instead of every frame.
+  // Throttle inference to ~15 times per second instead of every frame.
   // This dramatically reduces battery use and heat with no visible loss.
-  const INFERENCE_INTERVAL = 80; // ms (~12.5 fps)
+  const DETECTION_INTERVAL_MS = 66; // ms (~15 fps de detección)
+
+  // Small canvas for low-resolution inference (saves CPU/GPU on low-end devices)
+  const inferCanvas = document.createElement('canvas');
+  inferCanvas.width = 480;
+  inferCanvas.height = 270;
+  const inferCtx = inferCanvas.getContext('2d');
 
   async function runInference() {
     if (inferring || !cocoModel || !videoEl) return;
     if (videoEl.readyState < 2) return;
     inferring = true;
     try {
-      // Run COCO-SSD on the video element directly — uses internal canvas
-      const predictions = await cocoModel.detect(videoEl, 10, 0.15);
+      // Draw video into small canvas to reduce AI processing resolution
+      const vW = videoEl.videoWidth || 480;
+      const vH = videoEl.videoHeight || 270;
+      const scale = Math.min(480 / vW, 270 / vH);
+      const dw = Math.round(vW * scale);
+      const dh = Math.round(vH * scale);
+      inferCanvas.width = dw;
+      inferCanvas.height = dh;
+      inferCtx.drawImage(videoEl, 0, 0, dw, dh);
+      const predictions = await cocoModel.detect(inferCanvas, 10, 0.15);
+
+      // Scale bboxes back to video coordinate space
+      const scaleX = vW / dw;
+      const scaleY = vH / dh;
+      predictions.forEach(p => {
+        p.bbox[0] *= scaleX;
+        p.bbox[1] *= scaleY;
+        p.bbox[2] *= scaleX;
+        p.bbox[3] *= scaleY;
+      });
 
       // Filter to sports balls AND validate they look like actual balls
       const balls = predictions.filter(p => {
@@ -3495,7 +3544,7 @@ function startDetectionLoop() {
 
     // Run model inference at throttled rate (not every frame) to save battery
     const now = Date.now();
-    if (now - lastInferenceTime >= INFERENCE_INTERVAL) {
+    if (now - lastInferenceTime >= DETECTION_INTERVAL_MS) {
       lastInferenceTime = now;
       runInference();
     }
