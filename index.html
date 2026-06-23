@@ -1538,6 +1538,12 @@
     <video id="video" autoplay playsinline muted></video>
     <canvas id="canvas-overlay"></canvas>
 
+    <div id="debug-panel" style="position:absolute; bottom:8px; left:8px; background:rgba(0,0,0,0.6); color:#0f0; padding:4px 8px; font-family:monospace; font-size:10px; border-radius:4px; z-index:50; pointer-events:none; line-height:1.5;">
+      <span id="debug-fps">AI: -- fps</span><br>
+      <span id="debug-det">det: --</span> <span id="debug-conf"></span><br>
+      <span id="debug-device">--</span>
+    </div>
+
     <div class="challenge-ui" style="pointer-events:none;">
       <div class="challenge-top">
         <div class="timer-box">
@@ -3473,6 +3479,18 @@ function startDetectionLoop() {
   let inferring = false;
   let lastInferenceTime = 0;
   let ballHistory = [];       // vector queue: last 5 ball positions for prediction
+
+  // Debug panel state
+  const debugDevice = /android/i.test(navigator.userAgent) ? 'Android'
+                    : /iphone|ipad/i.test(navigator.userAgent) ? 'iPhone'
+                    : 'Desktop';
+  let debugDetectionTimes = []; // timestamps of recent detections for FPS calculation
+  let debugLastConf = null;
+  let debugLastDet = false;
+  (function initDebugDevice() {
+    const el = document.getElementById('debug-device');
+    if (el) el.textContent = debugDevice;
+  })();
   // Throttle inference to ~15 times per second instead of every frame.
   // This dramatically reduces battery use and heat with no visible loss.
   const DETECTION_INTERVAL_MS = 66; // ms (~15 fps de detección)
@@ -3521,6 +3539,19 @@ function startDetectionLoop() {
       });
 
       lastDetections = balls;
+
+      // Update debug panel
+      const now2 = performance.now();
+      debugDetectionTimes.push(now2);
+      debugDetectionTimes = debugDetectionTimes.filter(t => now2 - t <= 1000);
+      debugLastDet = balls.length > 0;
+      debugLastConf = balls.length > 0 ? balls[0].score : null;
+      const fpsDet = document.getElementById('debug-fps');
+      const detEl = document.getElementById('debug-det');
+      const confEl = document.getElementById('debug-conf');
+      if (fpsDet) fpsDet.textContent = 'AI: ' + debugDetectionTimes.length + ' fps';
+      if (detEl) detEl.textContent = debugLastDet ? '✓ bocha' : '— sin bocha';
+      if (confEl) confEl.textContent = debugLastConf !== null ? debugLastConf.toFixed(2) : '';
     } catch (e) {
       console.error('Inference error:', e);
     }
