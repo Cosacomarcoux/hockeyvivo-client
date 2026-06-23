@@ -4531,12 +4531,12 @@ async function saveResultToSupabase() {
       return false;
     }
 
-    // Upload video in background only if >= 5 ochos (filters failed detections)
+    // Upload video in background only if >= 1 ocho (filters users who didn't play)
     if (resultado && resultado.id) {
-      if (finalScore >= 5) {
+      if (finalScore >= 1) {
         stopVideoRecordingAndUpload(resultado.id);
       } else {
-        console.log('🟡 Video no se sube: menos de 5 ochos (' + finalScore + ')');
+        console.log('🟡 Video no se sube: 0 ochos (' + finalScore + ')');
         if (isRecording && mediaRecorder) {
           try { if (mediaRecorder.state !== 'inactive') mediaRecorder.stop(); } catch(e) {}
           isRecording = false;
