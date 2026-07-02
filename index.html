@@ -3060,14 +3060,28 @@ function selectSurface(surf) {
 
 // ============================================================
 //  FEATURE FLAG — activar RF-DETR con ?model=rfdetr en la URL
+//  El flag se persiste en sessionStorage para sobrevivir navegación
+//  interna (login, registro, etc.) que borra los query params.
 //  Por defecto (producción) usa COCO-SSD. Sin cambios en main.
 // ============================================================
-const USE_RFDETR = new URLSearchParams(window.location.search).get('model') === 'rfdetr';
+(function initRfdetrFlag() {
+  const urlFlag = new URLSearchParams(window.location.search).get('model') === 'rfdetr';
+  if (urlFlag) {
+    sessionStorage.setItem('USE_RFDETR', 'true');
+    console.log('[RFDETR] 🚀 Flag detectado en URL — guardado en sessionStorage');
+  }
+})();
+const USE_RFDETR = sessionStorage.getItem('USE_RFDETR') === 'true';
 if (USE_RFDETR) {
-  console.log('[RFDETR] 🚀 Modo RF-DETR activado por feature flag (?model=rfdetr)');
+  console.log('[RFDETR] 🚀 Modo RF-DETR activado (sessionStorage)');
 } else {
   console.log('[COCOSD] Modo COCO-SSD (default producción)');
 }
+// Helper de consola: desactivar RF-DETR sin cambiar URL (útil para debugging)
+window.disableRfdetr = () => {
+  sessionStorage.removeItem('USE_RFDETR');
+  console.log('[RFDETR] ❌ Flag eliminado de sessionStorage — refrescá la página para volver a COCO-SSD');
+};
 
 // ============================================================
 //  RF-DETR CONFIG — ajustá RFDETR_THRESHOLD para calibrar sensibilidad
