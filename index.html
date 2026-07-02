@@ -2001,6 +2001,12 @@
 
 <script>
 // ============================================================
+//  VERSION — cambiar al actualizar, para confirmar qué código corre
+// ============================================================
+const APP_VERSION = 'rf-detr-v3';
+console.log('[APP] 🟦 Versión cargada:', APP_VERSION, '| URL:', window.location.href);
+
+// ============================================================
 //  STATE
 // ============================================================
 let currentScreen = 'screen-login';
@@ -3082,6 +3088,18 @@ window.disableRfdetr = () => {
   sessionStorage.removeItem('USE_RFDETR');
   console.log('[RFDETR] ❌ Flag eliminado de sessionStorage — refrescá la página para volver a COCO-SSD');
 };
+
+// ── Carga EAGER del modelo ────────────────────────────────────────────────────
+// Si el flag está activo, iniciamos la descarga del modelo AHORA (en page load),
+// sin esperar a que el usuario arranque el challenge. Así:
+//   1. El log [RFDETR] ⏳ aparece en consola inmediatamente al cargar la página.
+//   2. Si hay un problema de versión/caché, se detecta antes de llegar a startChallenge().
+//   3. Cuando startChallenge() llama loadModel(), el modelo ya está listo (o cargando).
+if (USE_RFDETR) {
+  console.log('[RFDETR] 🚀 Iniciando carga eager del modelo ONNX en page load...');
+  // Usamos setTimeout(0) para no bloquear el render inicial del DOM
+  setTimeout(() => loadModel(), 0);
+}
 
 // ============================================================
 //  RF-DETR CONFIG — ajustá RFDETR_THRESHOLD para calibrar sensibilidad
