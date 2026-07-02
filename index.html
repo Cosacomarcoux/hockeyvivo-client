@@ -5,9 +5,11 @@
 <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
 <title>HockeyVivo Challenge</title>
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
-<!-- TensorFlow.js + COCO-SSD object detection model -->
+<!-- TensorFlow.js + COCO-SSD object detection model (kept as fallback) -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
+<!-- ONNX Runtime Web — used by RF-DETR custom model (?model=rfdetr) -->
+<script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js"></script>
 <style>
   :root {
     --rojo: #E63946;
@@ -3057,6 +3059,29 @@ function selectSurface(surf) {
 }
 
 // ============================================================
+//  FEATURE FLAG — activar RF-DETR con ?model=rfdetr en la URL
+//  Por defecto (producción) usa COCO-SSD. Sin cambios en main.
+// ============================================================
+const USE_RFDETR = new URLSearchParams(window.location.search).get('model') === 'rfdetr';
+if (USE_RFDETR) {
+  console.log('[RFDETR] 🚀 Modo RF-DETR activado por feature flag (?model=rfdetr)');
+} else {
+  console.log('[COCOSD] Modo COCO-SSD (default producción)');
+}
+
+// ============================================================
+//  RF-DETR CONFIG — ajustá RFDETR_THRESHOLD para calibrar sensibilidad
+// ============================================================
+const RFDETR_MODEL_URL = 'https://huggingface.co/Cosacomarcoux/hockeyvivo-bocha-detector/resolve/main/rfdetr-nano.onnx';
+const RFDETR_INPUT_SIZE = 384;       // resolución nativa del modelo (384×384)
+const RFDETR_THRESHOLD  = 0.30;      // umbral de confianza inicial (ajustable)
+const RFDETR_NUM_QUERIES = 300;      // queries que devuelve RF-DETR Nano
+const RFDETR_LOAD_TIMEOUT_MS = 15000; // 15s timeout → fallback a COCO-SSD
+// Normalización ImageNet (requerida por RF-DETR)
+const RFDETR_MEAN = [0.485, 0.456, 0.406];
+const RFDETR_STD  = [0.229, 0.224, 0.225];
+
+// ============================================================
 //  TENSORFLOW.JS OBJECT DETECTION MODEL
 // ============================================================
 let cocoModel = null;
@@ -3064,24 +3089,72 @@ let modelLoading = false;
 let lastDetections = [];   // most recent ball detections from model
 let modelRunning = false;  // mutex to avoid stacking inferences
 
-async function loadModel() {
+// RF-DETR state (parallel to cocoModel, never replaces it)
+let ortSession = null;
+let rfdetrLoading = false;
+let rfdetrFailed = false;  // true si el load falló → usa COCO-SSD como fallback
+
+async function _loadCocoSsd() {
   if (cocoModel || modelLoading) return cocoModel;
   modelLoading = true;
   try {
-    // Force WebGL backend for GPU acceleration on mobile
     if (typeof tf !== 'undefined') {
       await tf.setBackend('webgl');
       await tf.ready();
-      console.log('Backend:', tf.getBackend());
+      console.log('[COCOSD] Backend:', tf.getBackend());
     }
-    // lite_mobilenet_v2 is 5x faster — our shape/size filters compensate for lower accuracy
     cocoModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
-    console.log('✅ COCO-SSD (lite, WebGL) model loaded');
+    console.log('[COCOSD] ✅ Modelo cargado (lite_mobilenet_v2 + WebGL)');
   } catch (e) {
-    console.error('Model load error:', e);
+    console.error('[COCOSD] ❌ Error al cargar modelo:', e);
   }
   modelLoading = false;
   return cocoModel;
+}
+
+async function _loadRfdetr() {
+  if (ortSession || rfdetrLoading) return ortSession;
+  rfdetrLoading = true;
+  const t0 = performance.now();
+  console.log('[RFDETR] ⏳ Descargando modelo ONNX desde Hugging Face...');
+  console.log('[RFDETR]    URL:', RFDETR_MODEL_URL);
+
+  try {
+    // Apuntar los archivos WASM al CDN para evitar fallos silenciosos en móvil
+    if (typeof ort !== 'undefined') {
+      ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
+    }
+
+    // Timeout de 15s: si el modelo no carga, fallback a COCO-SSD
+    const sessionPromise = ort.InferenceSession.create(RFDETR_MODEL_URL, {
+      executionProviders: ['wasm'], // wasm explícito — WebGL falla en móviles con modelos grandes
+    });
+    const timeoutPromise = new Promise((_, reject) =>
+      setTimeout(() => reject(new Error('Timeout 15s al cargar ONNX')), RFDETR_LOAD_TIMEOUT_MS)
+    );
+
+    ortSession = await Promise.race([sessionPromise, timeoutPromise]);
+    const elapsed = Math.round(performance.now() - t0);
+    console.log(`[RFDETR] ✅ Modelo cargado en ${elapsed}ms`);
+    console.log('[RFDETR]    Inputs:', ortSession.inputNames);
+    console.log('[RFDETR]    Outputs:', ortSession.outputNames);
+  } catch (e) {
+    rfdetrFailed = true;
+    console.warn('[RFDETR] ⚠️ Fallo al cargar ONNX — activando fallback a COCO-SSD:', e.message || e);
+    // Fallback: cargar COCO-SSD para que el usuario nunca quede sin detección
+    await _loadCocoSsd();
+  }
+
+  rfdetrLoading = false;
+  return ortSession;
+}
+
+async function loadModel() {
+  if (USE_RFDETR) {
+    return await _loadRfdetr();
+  } else {
+    return await _loadCocoSsd();
+  }
 }
 
 // ============================================================
@@ -3497,41 +3570,179 @@ function startDetectionLoop() {
 
   // Hidden canvas used ONLY to feed the AI model at reduced resolution.
   // Never appended to the DOM — the <video> element keeps its native resolution.
+  // Size: 384×384 for RF-DETR, 320×240 for COCO-SSD (set in initModelCanvas below).
   const modelCanvas = document.createElement('canvas');
-  modelCanvas.width = 320;
-  modelCanvas.height = 240;
   const modelCtx = modelCanvas.getContext('2d');
 
+  // Set canvas size according to active model
+  function initModelCanvas() {
+    if (USE_RFDETR && ortSession && !rfdetrFailed) {
+      modelCanvas.width  = RFDETR_INPUT_SIZE; // 384
+      modelCanvas.height = RFDETR_INPUT_SIZE; // 384
+      console.log('[RFDETR] Canvas de inferencia: 384×384');
+    } else {
+      modelCanvas.width  = 320;
+      modelCanvas.height = 240;
+      console.log('[COCOSD] Canvas de inferencia: 320×240');
+    }
+  }
+  // Initialize immediately (may be overridden once RF-DETR loads)
+  modelCanvas.width  = USE_RFDETR ? RFDETR_INPUT_SIZE : 320;
+  modelCanvas.height = USE_RFDETR ? RFDETR_INPUT_SIZE : 240;
+
+  // ── RF-DETR postprocessing helpers ──────────────────────────────────────────
+
+  // Build NCHW Float32Array from canvas ImageData with ImageNet normalization
+  function _rfdetrBuildTensor(canvas, ctx) {
+    const { width: W, height: H } = canvas;
+    ctx.drawImage(videoEl, 0, 0, W, H);
+    const imgData = ctx.getImageData(0, 0, W, H).data; // RGBA Uint8ClampedArray
+    const N = W * H;
+    const tensor = new Float32Array(3 * N);
+    for (let i = 0; i < N; i++) {
+      const r = imgData[i * 4]     / 255;
+      const g = imgData[i * 4 + 1] / 255;
+      const b = imgData[i * 4 + 2] / 255;
+      // Channel-first (NCHW): R plane, then G plane, then B plane
+      tensor[i]         = (r - RFDETR_MEAN[0]) / RFDETR_STD[0]; // R
+      tensor[N + i]     = (g - RFDETR_MEAN[1]) / RFDETR_STD[1]; // G
+      tensor[N * 2 + i] = (b - RFDETR_MEAN[2]) / RFDETR_STD[2]; // B
+    }
+    return tensor;
+  }
+
+  // Sigmoid: 1 / (1 + e^-x), clamped to avoid overflow
+  function _sigmoid(x) {
+    return 1.0 / (1.0 + Math.exp(-Math.max(-88, Math.min(88, x))));
+  }
+
+  // Run RF-DETR inference and return detections in the same format as COCO-SSD
+  // Output format: [{ bbox: [x, y, w, h], score, class: 'sports ball' }, ...]
+  async function _runRfdetrInference() {
+    const t0 = performance.now();
+
+    // Build input tensor [1, 3, 384, 384]
+    const tensorData = _rfdetrBuildTensor(modelCanvas, modelCtx);
+    const inputTensor = new ort.Tensor('float32', tensorData, [1, 3, RFDETR_INPUT_SIZE, RFDETR_INPUT_SIZE]);
+
+    // Run ONNX session
+    const feeds = { 'input': inputTensor };
+    const results = await ortSession.run(feeds);
+
+    const inferMs = Math.round(performance.now() - t0);
+
+    // Extract output tensors
+    // "dets"   → [1, 300, 4]  normalized cxcywh
+    // "labels" → [1, 300, num_classes+1]  raw logits (last col = no-object, drop it)
+    const detsData   = results['dets'].data;    // Float32Array length 300*4
+    const labelsData = results['labels'].data;  // Float32Array length 300*(numClasses+1)
+    const numClasses = (results['labels'].dims[2] - 1); // drop no-object slot
+    const Q = RFDETR_NUM_QUERIES;
+
+    const vW = videoEl.videoWidth;
+    const vH = videoEl.videoHeight;
+
+    const balls = [];
+    let totalAboveThreshold = 0;
+
+    for (let q = 0; q < Q; q++) {
+      // Get best class score via sigmoid (ignoring no-object slot = last column)
+      let bestScore = -Infinity;
+      let bestClass = 0;
+      for (let c = 0; c < numClasses; c++) {
+        const logit = labelsData[q * (numClasses + 1) + c];
+        const score = _sigmoid(logit);
+        if (score > bestScore) { bestScore = score; bestClass = c; }
+      }
+
+      if (bestScore < RFDETR_THRESHOLD) continue;
+      totalAboveThreshold++;
+
+      // Decode bbox: normalized cxcywh → pixel xywh
+      const cx = detsData[q * 4];
+      const cy = detsData[q * 4 + 1];
+      const bw = detsData[q * 4 + 2];
+      const bh = detsData[q * 4 + 3];
+
+      const x = (cx - bw / 2) * vW;
+      const y = (cy - bh / 2) * vH;
+      const w = bw * vW;
+      const h = bh * vH;
+
+      // Apply same validation filters as COCO-SSD path
+      const aspect = w / h;
+      if (aspect < 0.6 || aspect > 1.6) continue;
+      if (w < 8 || h < 8) continue;
+      if (w > vW * 0.3 || h > vH * 0.3) continue;
+
+      balls.push({ bbox: [x, y, w, h], score: bestScore, class: 'sports ball' });
+      console.log(`[RFDETR] 🎯 Detección q=${q} class=${bestClass} score=${bestScore.toFixed(3)} bbox=[${Math.round(x)},${Math.round(y)},${Math.round(w)},${Math.round(h)}]`);
+    }
+
+    console.log(`[RFDETR] 🔍 Inferencia: ${inferMs}ms | ${Q} queries → ${totalAboveThreshold} sobre umbral (${RFDETR_THRESHOLD}) → ${balls.length} válidas`);
+    return balls;
+  }
+
+  // ── COCO-SSD inference (unchanged) ──────────────────────────────────────────
+
+  async function _runCocoSsdInference() {
+    const t0 = performance.now();
+    modelCtx.drawImage(videoEl, 0, 0, 320, 240);
+    const predictions = await cocoModel.detect(modelCanvas, 10, 0.15);
+    const inferMs = Math.round(performance.now() - t0);
+
+    // Scale bboxes from model-canvas space (320×240) back to native video space
+    const scaleX = videoEl.videoWidth / 320;
+    const scaleY = videoEl.videoHeight / 240;
+    predictions.forEach(p => {
+      p.bbox[0] *= scaleX;
+      p.bbox[1] *= scaleY;
+      p.bbox[2] *= scaleX;
+      p.bbox[3] *= scaleY;
+    });
+
+    // Filter to sports balls AND validate they look like actual balls
+    const balls = predictions.filter(p => {
+      if (p.class !== 'sports ball') return false;
+      const [x, y, w, h] = p.bbox;
+      const aspect = w / h;
+      if (aspect < 0.6 || aspect > 1.6) return false;
+      if (w < 8 || h < 8) return false;
+      if (w > videoEl.videoWidth * 0.3 || h > videoEl.videoHeight * 0.3) return false;
+      return true;
+    });
+
+    console.log(`[COCOSD] 🔍 Inferencia: ${inferMs}ms | ${predictions.length} dets → ${balls.length} sports ball válidas`);
+    return balls;
+  }
+
+  // ── Unified inference entry point ────────────────────────────────────────────
+
   async function runInference() {
-    if (inferring || !cocoModel || !videoEl) return;
+    // Decide qué modelo usar: RF-DETR si flag activo Y sesión cargada Y no falló
+    const useRfdetr = USE_RFDETR && ortSession && !rfdetrFailed;
+    const modelReady = useRfdetr ? !!ortSession : !!cocoModel;
+
+    if (inferring || !modelReady || !videoEl) return;
     if (videoEl.readyState < 2) return;
     inferring = true;
+
     try {
-      // Draw the video frame into the fixed 320x240 model canvas.
-      // The <video> element itself is NOT touched — it stays at native resolution.
-      modelCtx.drawImage(videoEl, 0, 0, 320, 240);
-      const predictions = await cocoModel.detect(modelCanvas, 10, 0.15);
+      // Si RF-DETR falló y el fallback COCO-SSD tampoco cargó, salir
+      if (useRfdetr && !ortSession) { inferring = false; return; }
 
-      // Scale bboxes from model-canvas space (320x240) back to native video space
-      const scaleX = videoEl.videoWidth / 320;
-      const scaleY = videoEl.videoHeight / 240;
-      predictions.forEach(p => {
-        p.bbox[0] *= scaleX;
-        p.bbox[1] *= scaleY;
-        p.bbox[2] *= scaleX;
-        p.bbox[3] *= scaleY;
-      });
+      // Si el canvas no tiene el tamaño correcto para RF-DETR, corregirlo
+      if (useRfdetr && (modelCanvas.width !== RFDETR_INPUT_SIZE || modelCanvas.height !== RFDETR_INPUT_SIZE)) {
+        modelCanvas.width  = RFDETR_INPUT_SIZE;
+        modelCanvas.height = RFDETR_INPUT_SIZE;
+      } else if (!useRfdetr && (modelCanvas.width !== 320 || modelCanvas.height !== 240)) {
+        modelCanvas.width  = 320;
+        modelCanvas.height = 240;
+      }
 
-      // Filter to sports balls AND validate they look like actual balls
-      const balls = predictions.filter(p => {
-        if (p.class !== 'sports ball') return false;
-        const [x, y, w, h] = p.bbox;
-        const aspect = w / h;
-        if (aspect < 0.6 || aspect > 1.6) return false;
-        if (w < 8 || h < 8) return false;
-        if (w > videoEl.videoWidth * 0.3 || h > videoEl.videoHeight * 0.3) return false;
-        return true;
-      });
+      const balls = useRfdetr
+        ? await _runRfdetrInference()
+        : await _runCocoSsdInference();
 
       lastDetections = balls;
 
@@ -3542,13 +3753,13 @@ function startDetectionLoop() {
       debugLastDet = balls.length > 0;
       debugLastConf = balls.length > 0 ? balls[0].score : null;
       const fpsDet = document.getElementById('debug-fps');
-      const detEl = document.getElementById('debug-det');
+      const detEl  = document.getElementById('debug-det');
       const confEl = document.getElementById('debug-conf');
-      if (fpsDet) fpsDet.textContent = 'AI: ' + debugDetectionTimes.length + ' fps';
-      if (detEl) detEl.textContent = debugLastDet ? '✓ bocha' : '— sin bocha';
+      if (fpsDet) fpsDet.textContent = (useRfdetr ? 'RFDETR: ' : 'AI: ') + debugDetectionTimes.length + ' fps';
+      if (detEl)  detEl.textContent  = debugLastDet ? '✓ bocha' : '— sin bocha';
       if (confEl) confEl.textContent = debugLastConf !== null ? debugLastConf.toFixed(2) : '';
     } catch (e) {
-      console.error('Inference error:', e);
+      console.error('[' + (useRfdetr ? 'RFDETR' : 'COCOSD') + '] ❌ Inference error:', e);
     }
     inferring = false;
   }
