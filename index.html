@@ -3108,7 +3108,7 @@ const RFDETR_MODEL_URL = 'https://huggingface.co/Cosacomarcoux/hockeyvivo-bocha-
 const RFDETR_INPUT_SIZE = 384;       // resolución nativa del modelo (384×384)
 const RFDETR_THRESHOLD  = 0.30;      // umbral de confianza inicial (ajustable)
 const RFDETR_NUM_QUERIES = 300;      // queries que devuelve RF-DETR Nano
-const RFDETR_LOAD_TIMEOUT_MS = 15000; // 15s timeout → fallback a COCO-SSD
+const RFDETR_LOAD_TIMEOUT_MS = 60000; // 60s timeout — modelo ~25MB en single-thread WASM
 // Normalización ImageNet (requerida por RF-DETR)
 const RFDETR_MEAN = [0.485, 0.456, 0.406];
 const RFDETR_STD  = [0.229, 0.224, 0.225];
@@ -3166,19 +3166,37 @@ async function _loadRfdetr() {
   try {
     // Apuntar los archivos WASM al CDN para evitar fallos silenciosos en móvil
     ort.env.wasm.wasmPaths = 'https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/';
-    console.log('[RFDETR]    wasmPaths configurado');
+    // Forzar single-thread: Cloudflare Pages no envía COOP/COEP headers, así que
+    // SharedArrayBuffer no está disponible y numThreads > 1 produce un warning y falla.
+    ort.env.wasm.numThreads = 1;
+    ort.env.wasm.simd = true;  // SIMD sí está disponible en browsers modernos
+    console.log('[RFDETR]    wasmPaths configurado | numThreads=1 | simd=true');
 
-    // Timeout de 15s: si el modelo no carga, fallback a COCO-SSD
-    const sessionPromise = ort.InferenceSession.create(RFDETR_MODEL_URL, {
-      executionProviders: ['wasm'], // wasm explícito — WebGL falla en móviles con modelos grandes
+    // ── Paso 1: descargar el archivo como ArrayBuffer (trackeamos tiempo separado) ──
+    const tDl = performance.now();
+    console.log('[RFDETR]    Iniciando fetch del modelo...');
+    const response = await fetch(RFDETR_MODEL_URL);
+    if (!response.ok) throw new Error(`HTTP ${response.status} al descargar modelo`);
+    const modelBuffer = await response.arrayBuffer();
+    const downloadMs = (performance.now() - tDl).toFixed(0);
+    console.log(`[RFDETR]    ✅ Descarga: ${downloadMs}ms | Tamaño: ${(modelBuffer.byteLength / 1024 / 1024).toFixed(1)} MB`);
+
+    // ── Paso 2: crear la InferenceSession desde el buffer (trackeamos parseo/compilación) ──
+    const tParse = performance.now();
+    console.log('[RFDETR]    Compilando sesión ONNX...');
+    const sessionPromise = ort.InferenceSession.create(modelBuffer, {
+      executionProviders: ['wasm'],
+      graphOptimizationLevel: 'all',
     });
     const timeoutPromise = new Promise((_, reject) =>
-      setTimeout(() => reject(new Error('Timeout ' + RFDETR_LOAD_TIMEOUT_MS + 'ms al cargar ONNX')), RFDETR_LOAD_TIMEOUT_MS)
+      setTimeout(() => reject(new Error('Timeout ' + RFDETR_LOAD_TIMEOUT_MS + 'ms al compilar sesión ONNX')), RFDETR_LOAD_TIMEOUT_MS)
     );
 
     ortSession = await Promise.race([sessionPromise, timeoutPromise]);
-    const elapsed = Math.round(performance.now() - t0);
-    console.log(`[RFDETR] ✅ Modelo cargado en ${elapsed}ms`);
+    const parseMs = (performance.now() - tParse).toFixed(0);
+    const totalMs = Math.round(performance.now() - t0);
+    console.log(`[RFDETR]    ✅ Sesión compilada en ${parseMs}ms`);
+    console.log(`[RFDETR] ✅ Modelo listo — total: ${totalMs}ms (descarga: ${downloadMs}ms + compilación: ${parseMs}ms)`);
     console.log('[RFDETR]    Inputs:', ortSession.inputNames);
     console.log('[RFDETR]    Outputs:', ortSession.outputNames);
   } catch (e) {
