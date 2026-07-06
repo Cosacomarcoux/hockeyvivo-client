@@ -3137,6 +3137,21 @@ async function _loadCocoSsd() {
     }
     cocoModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
     console.log('[COCOSD] ✅ Modelo cargado (lite_mobilenet_v2 + WebGL)');
+
+    // Warmup: 3 dummy inferences to compile WebGL shaders before gameplay.
+    // On Android this prevents a 800ms–2s spike on the first real frame.
+    console.log('[COCOSD] 🔥 Iniciando warmup del modelo...');
+    const dummyCanvas = document.createElement('canvas');
+    dummyCanvas.width = 320; dummyCanvas.height = 240;
+    const dummyCtx = dummyCanvas.getContext('2d');
+    dummyCtx.fillStyle = 'black';
+    dummyCtx.fillRect(0, 0, 320, 240);
+    const warmupStart = performance.now();
+    for (let i = 0; i < 3; i++) {
+      await cocoModel.detect(dummyCanvas);
+    }
+    const warmupTime = performance.now() - warmupStart;
+    console.log(`[COCOSD] ✅ Warmup completo: ${warmupTime.toFixed(0)}ms (3 inferencias)`);
   } catch (e) {
     console.error('[COCOSD] ❌ Error al cargar modelo:', e);
   }
@@ -3228,6 +3243,7 @@ async function loadModel() {
   const isAndroid = /android/i.test(navigator.userAgent);
   const cpuCores = navigator.hardwareConcurrency || 4;
   const isLowEnd = isAndroid && cpuCores < 6;
+  window.IS_LOW_END = isLowEnd;  // expose globally for model/camera config
 
   if (isLowEnd) {
     console.warn('⚠️ Dispositivo de gama baja detectado');
@@ -3466,8 +3482,8 @@ async function startChallenge() {
         facingMode: { ideal: 'environment' },
         // HD 720p — good balance: detects the ball at ~1m distance on most
         // modern phones, without the battery drain of full/4K resolution.
-        width: { ideal: 1280 },
-        height: { ideal: 720 }
+        width: { ideal: window.IS_LOW_END ? 640 : 1280 },
+        height: { ideal: window.IS_LOW_END ? 480 : 720 }
       },
       audio: false
     });
@@ -3616,6 +3632,7 @@ function startDetectionLoop() {
   let inferring = false;
   let lastInferenceTime = 0;
   let ballHistory = [];       // vector queue: last 5 ball positions for prediction
+  let cocoInferFrameCount = 0;  // throttle inference logs to every 30 frames
 
   // Debug panel state
   const debugDevice = /android/i.test(navigator.userAgent) ? 'Android'
@@ -3645,14 +3662,16 @@ function startDetectionLoop() {
       modelCanvas.height = RFDETR_INPUT_SIZE; // 384
       console.log('[RFDETR] Canvas de inferencia: 384×384');
     } else {
-      modelCanvas.width  = 320;
-      modelCanvas.height = 240;
-      console.log('[COCOSD] Canvas de inferencia: 320×240');
+      const mW = window.IS_LOW_END ? 224 : 320;
+      const mH = window.IS_LOW_END ? 168 : 240;
+      modelCanvas.width  = mW;
+      modelCanvas.height = mH;
+      console.log(`[COCOSD] Canvas de inferencia: ${mW}×${mH} (${window.IS_LOW_END ? 'low-end' : 'normal'})`);
     }
   }
   // Initialize immediately (may be overridden once RF-DETR loads)
-  modelCanvas.width  = USE_RFDETR ? RFDETR_INPUT_SIZE : 320;
-  modelCanvas.height = USE_RFDETR ? RFDETR_INPUT_SIZE : 240;
+  modelCanvas.width  = USE_RFDETR ? RFDETR_INPUT_SIZE : (window.IS_LOW_END ? 224 : 320);
+  modelCanvas.height = USE_RFDETR ? RFDETR_INPUT_SIZE : (window.IS_LOW_END ? 168 : 240);
 
   // ── RF-DETR postprocessing helpers ──────────────────────────────────────────
 
@@ -3751,13 +3770,15 @@ function startDetectionLoop() {
 
   async function _runCocoSsdInference() {
     const t0 = performance.now();
-    modelCtx.drawImage(videoEl, 0, 0, 320, 240);
+    const mW = modelCanvas.width;
+    const mH = modelCanvas.height;
+    modelCtx.drawImage(videoEl, 0, 0, mW, mH);
     const predictions = await cocoModel.detect(modelCanvas, 10, 0.15);
     const inferMs = Math.round(performance.now() - t0);
 
-    // Scale bboxes from model-canvas space (320×240) back to native video space
-    const scaleX = videoEl.videoWidth / 320;
-    const scaleY = videoEl.videoHeight / 240;
+    // Scale bboxes from model-canvas space back to native video space
+    const scaleX = videoEl.videoWidth / mW;
+    const scaleY = videoEl.videoHeight / mH;
     predictions.forEach(p => {
       p.bbox[0] *= scaleX;
       p.bbox[1] *= scaleY;
@@ -3776,7 +3797,10 @@ function startDetectionLoop() {
       return true;
     });
 
-    console.log(`[COCOSD] 🔍 Inferencia: ${inferMs}ms | ${predictions.length} dets → ${balls.length} sports ball válidas`);
+    cocoInferFrameCount++;
+    if (cocoInferFrameCount % 30 === 0) {
+      console.log(`[COCOSD] Inferencia promedio: ${inferMs}ms | Device: ${window.IS_LOW_END ? 'low-end' : 'normal'} | Canvas: ${mW}×${mH}`);
+    }
     return balls;
   }
 
