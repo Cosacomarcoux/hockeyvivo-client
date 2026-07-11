@@ -7,6 +7,8 @@
 <link href="https://fonts.googleapis.com/css2?family=Bebas+Neue&family=Barlow+Condensed:wght@400;600;700&family=Barlow:wght@400;500&display=swap" rel="stylesheet">
 <!-- TensorFlow.js + COCO-SSD object detection model (kept as fallback) -->
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@4.20.0/dist/tf.min.js"></script>
+<!-- WASM backend — cargado siempre pero solo activado con ?backend=wasm (feature flag) -->
+<script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.20.0/dist/tf-backend-wasm.min.js"></script>
 <script src="https://cdn.jsdelivr.net/npm/@tensorflow-models/coco-ssd@2.2.3/dist/coco-ssd.min.js"></script>
 <!-- ONNX Runtime Web — used by RF-DETR custom model (?model=rfdetr) -->
 <script src="https://cdn.jsdelivr.net/npm/onnxruntime-web@1.18.0/dist/ort.min.js"></script>
@@ -3089,6 +3091,27 @@ window.disableRfdetr = () => {
   console.log('[RFDETR] ❌ Flag eliminado de sessionStorage — refrescá la página para volver a COCO-SSD');
 };
 
+// ============================================================
+//  FEATURE FLAG — probar WASM+SIMD backend con ?backend=wasm
+//  Solo para testing en feature/test-wasm-backend. NO en main.
+// ============================================================
+(function initWasmBackendFlag() {
+  const urlBackend = new URLSearchParams(window.location.search).get('backend');
+  if (urlBackend === 'wasm') {
+    sessionStorage.setItem('USE_WASM_BACKEND', 'true');
+    console.log('[BACKEND] 🚀 Flag detectado en URL — WASM backend activado');
+  }
+})();
+const USE_WASM_BACKEND = sessionStorage.getItem('USE_WASM_BACKEND') === 'true';
+if (USE_WASM_BACKEND) {
+  console.log('[BACKEND] 🚀 Modo WASM+SIMD activado (sessionStorage)');
+}
+// Helper de consola: desactivar sin cambiar URL
+window.disableWasmBackend = () => {
+  sessionStorage.removeItem('USE_WASM_BACKEND');
+  console.log('[BACKEND] ❌ Flag eliminado, refrescá la página');
+};
+
 // ── Carga EAGER del modelo ────────────────────────────────────────────────────
 // Si el flag está activo, iniciamos la descarga del modelo AHORA (en page load),
 // sin esperar a que el usuario arranque el challenge. Así:
@@ -3131,12 +3154,28 @@ async function _loadCocoSsd() {
   modelLoading = true;
   try {
     if (typeof tf !== 'undefined') {
-      await tf.setBackend('webgl');
-      await tf.ready();
+      if (USE_WASM_BACKEND) {
+        try {
+          // tf-backend-wasm@4.20.0 ya está cargado vía script tag — seteamos path y backend
+          tf.setWasmPaths('https://cdn.jsdelivr.net/npm/@tensorflow/tfjs-backend-wasm@4.20.0/dist/');
+          await tf.setBackend('wasm');
+          await tf.ready();
+          const simd = tf.env().getBool('WASM_HAS_SIMD_SUPPORT');
+          const threads = tf.env().getBool('WASM_HAS_MULTITHREAD_SUPPORT');
+          console.log(`[BACKEND] ✅ WASM activo | SIMD: ${simd} | Threads: ${threads}`);
+        } catch (err) {
+          console.warn('[BACKEND] ⚠️ WASM falló, fallback a WebGL:', err.message);
+          await tf.setBackend('webgl');
+          await tf.ready();
+        }
+      } else {
+        await tf.setBackend('webgl');
+        await tf.ready();
+      }
       console.log('[COCOSD] Backend:', tf.getBackend());
     }
     cocoModel = await cocoSsd.load({ base: 'lite_mobilenet_v2' });
-    console.log('[COCOSD] ✅ Modelo cargado (lite_mobilenet_v2 + WebGL)');
+    console.log(`[COCOSD] ✅ Modelo cargado (lite_mobilenet_v2 + ${tf.getBackend()})`);
 
     // Warmup: 3 dummy inferences to compile WebGL shaders before gameplay.
     // On Android this prevents a 800ms–2s spike on the first real frame.
@@ -3799,7 +3838,8 @@ function startDetectionLoop() {
 
     cocoInferFrameCount++;
     if (cocoInferFrameCount % 30 === 0) {
-      console.log(`[COCOSD] Inferencia promedio: ${inferMs}ms | Device: ${window.IS_LOW_END ? 'low-end' : 'normal'} | Canvas: ${mW}×${mH}`);
+      const backend = tf.getBackend();
+      console.log(`[COCOSD] Inferencia: ${inferMs}ms | Backend: ${backend} | Device: ${window.IS_LOW_END ? 'low-end' : 'normal'} | Canvas: ${mW}×${mH}`);
     }
     return balls;
   }
