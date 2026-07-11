@@ -3241,25 +3241,9 @@ async function loadModel() {
 // ============================================================
 (function detectLowEndDevice() {
   const isAndroid = /android/i.test(navigator.userAgent);
-  const isIOS = /iphone|ipad|ipod/i.test(navigator.userAgent);
   const cpuCores = navigator.hardwareConcurrency || 4;
-  const deviceMemory = navigator.deviceMemory || 4; // RAM en GB (Chrome only)
-
-  // iPhone/iPad: nunca low-end (GPU dedicada excelente)
-  // Desktop: nunca low-end
-  let isLowEnd = false;
-  if (!isIOS && isAndroid) {
-    if (cpuCores < 8) isLowEnd = true;
-    else if (deviceMemory < 4) isLowEnd = true;
-    else {
-      // Gama media conocida sin "Pro"/"Ultra" en el nombre
-      const midRangeBrands = /redmi(?!.*(pro|ultra))|realme(?!.*pro)|moto\s*g\s*\d/i;
-      if (midRangeBrands.test(navigator.userAgent)) isLowEnd = true;
-    }
-  }
-
+  const isLowEnd = isAndroid && cpuCores < 6;
   window.IS_LOW_END = isLowEnd;  // expose globally for model/camera config
-  console.log(`[DEVICE] IS_LOW_END: ${isLowEnd} | Cores: ${navigator.hardwareConcurrency} | Memory: ${navigator.deviceMemory}GB | UA: ${navigator.userAgent.substring(0, 100)}`);
 
   if (isLowEnd) {
     console.warn('⚠️ Dispositivo de gama baja detectado');
@@ -3442,7 +3426,6 @@ async function startChallenge() {
   // true from a previous challenge never blocks the new one.
   resultSaved = false;
   console.log('🟢 Flag reseteado a false en startChallenge');
-  console.log(`[COCOSD] Iniciando challenge | Modo: ${window.IS_LOW_END ? 'LOW-END (192x144)' : 'NORMAL (256x192)'} | Camara: 640x480`);
 
   // Check daily attempt limit before opening camera
   const intentosInfo = await verificarIntentos();
@@ -3497,10 +3480,10 @@ async function startChallenge() {
     stream = await navigator.mediaDevices.getUserMedia({
       video: {
         facingMode: { ideal: 'environment' },
-        // 640×480 para todos: ahorra CPU/GPU/batería sin impacto visual notable
-        // en pantallas de celular. Suficiente para detectar la pelota a ~1m.
-        width: { ideal: 640 },
-        height: { ideal: 480 }
+        // HD 720p — good balance: detects the ball at ~1m distance on most
+        // modern phones, without the battery drain of full/4K resolution.
+        width: { ideal: window.IS_LOW_END ? 640 : 1280 },
+        height: { ideal: window.IS_LOW_END ? 480 : 720 }
       },
       audio: false
     });
@@ -3679,16 +3662,16 @@ function startDetectionLoop() {
       modelCanvas.height = RFDETR_INPUT_SIZE; // 384
       console.log('[RFDETR] Canvas de inferencia: 384×384');
     } else {
-      const mW = window.IS_LOW_END ? 192 : 256;
-      const mH = window.IS_LOW_END ? 144 : 192;
+      const mW = window.IS_LOW_END ? 224 : 320;
+      const mH = window.IS_LOW_END ? 168 : 240;
       modelCanvas.width  = mW;
       modelCanvas.height = mH;
       console.log(`[COCOSD] Canvas de inferencia: ${mW}×${mH} (${window.IS_LOW_END ? 'low-end' : 'normal'})`);
     }
   }
   // Initialize immediately (may be overridden once RF-DETR loads)
-  modelCanvas.width  = USE_RFDETR ? RFDETR_INPUT_SIZE : (window.IS_LOW_END ? 192 : 256);
-  modelCanvas.height = USE_RFDETR ? RFDETR_INPUT_SIZE : (window.IS_LOW_END ? 144 : 192);
+  modelCanvas.width  = USE_RFDETR ? RFDETR_INPUT_SIZE : (window.IS_LOW_END ? 224 : 320);
+  modelCanvas.height = USE_RFDETR ? RFDETR_INPUT_SIZE : (window.IS_LOW_END ? 168 : 240);
 
   // ── RF-DETR postprocessing helpers ──────────────────────────────────────────
 
