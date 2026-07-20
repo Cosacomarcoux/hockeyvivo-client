@@ -1560,12 +1560,19 @@
         </div>
       </div>
 
+      <!-- Círculo de calibración de bocha -->
+      <div id="calib-circle" style="display:none; position:absolute; top:50%; left:50%; transform:translate(-50%,-50%); width:150px; height:150px; border:4px dashed #FFD600; border-radius:50%; box-shadow:0 0 24px rgba(255,214,0,0.5); pointer-events:none; z-index:5;"></div>
       <div class="challenge-bottom" style="pointer-events:none;">
         <div class="status-bar" id="status-bar">🔍 Buscando la bocha...</div>
         <button class="btn-start-small" id="btn-start-challenge"
           onclick="beginCountdown()"
           style="pointer-events:all; display:none;">
           ▶ COMENZAR
+        </button>
+        <button class="btn-start-small btn-remark" id="btn-skip-calib"
+          onclick="saltarCalibracion()"
+          style="pointer-events:all; display:none;">
+          Saltar calibración
         </button>
         <button class="btn-start-small btn-remark" id="btn-remark-cones"
           onclick="restartConeMarking()"
@@ -3626,16 +3633,48 @@ function handleConeTap(e) {
     coneB = { x, y };
     coneMarkingStep = 2;
     conesMarked = true;
-    document.getElementById('status-bar').textContent = '✅ Conos marcados — ¡listo para comenzar!';
-    document.getElementById('status-bar').className = 'status-bar detected';
-    document.getElementById('btn-start-challenge').style.display = 'block';
     document.getElementById('btn-remark-cones').style.display = 'block';
     playBeep(880, 0.12, 'sine', 0.3);
     // Disable further taps
     const canvas = document.getElementById('canvas-overlay');
     canvas.style.pointerEvents = 'none';
+    // Conos listos → calibrar la bocha antes de habilitar COMENZAR
+    iniciarCalibracionBocha();
   }
 }
+
+// ============================================================
+//  CALIBRACIÓN DE BOCHA
+//  Después de marcar los conos, se pide mostrar la bocha quieta dentro del
+//  círculo ~1.5s. El loop de detección muestrea su color real y el tracker
+//  arranca sabiendo exactamente qué buscar (clave en Android, donde el
+//  modelo tarda en dar la primera detección).
+// ============================================================
+window._calibBocha = { activa: false, hecha: false, muestras: [], inicio: 0 };
+
+function iniciarCalibracionBocha() {
+  window._calibBocha = { activa: true, hecha: false, muestras: [], inicio: Date.now() };
+  document.getElementById('calib-circle').style.display = 'block';
+  document.getElementById('btn-skip-calib').style.display = 'block';
+  document.getElementById('btn-start-challenge').style.display = 'none';
+  const sb = document.getElementById('status-bar');
+  sb.textContent = '🎯 Poné la bocha quieta dentro del círculo amarillo';
+  sb.className = 'status-bar';
+}
+
+function finCalibracionBocha(ok) {
+  window._calibBocha.activa = false;
+  window._calibBocha.hecha = ok;
+  document.getElementById('calib-circle').style.display = 'none';
+  document.getElementById('btn-skip-calib').style.display = 'none';
+  document.getElementById('btn-start-challenge').style.display = 'block';
+  const sb = document.getElementById('status-bar');
+  sb.textContent = ok ? '✅ Bocha calibrada — presioná COMENZAR' : '✅ Todo listo — presioná COMENZAR';
+  sb.className = 'status-bar detected';
+  if (ok) playBeep(880, 0.12, 'sine', 0.3);
+}
+
+function saltarCalibracion() { finCalibracionBocha(false); }
 
 function restartConeMarking() {
   // Re-enable tapping
@@ -3958,6 +3997,46 @@ function startDetectionLoop() {
     } catch (e) { return null; }
   }
 
+  // Un paso de calibración: muestrea el color del centro del círculo y, cuando
+  // junta suficientes muestras estables, fija el color de referencia del tracker.
+  function _calibStep(vW, vH) {
+    const c = window._calibBocha;
+    const r = Math.max(30, Math.min(vW, vH) * 0.10);
+    try {
+      trackCtx.drawImage(videoEl, vW / 2 - r, vH / 2 - r, r * 2, r * 2, 0, 0, 16, 16);
+      const d = trackCtx.getImageData(4, 4, 8, 8).data; // solo el centro del círculo
+      let R = 0, G = 0, B = 0;
+      for (let i = 0; i < 64; i++) { R += d[i*4]; G += d[i*4+1]; B += d[i*4+2]; }
+      const sum = R + G + B;
+      if (sum >= 600) {
+        const rn = R / sum, gn = G / sum;
+        // Descartar verde-dominante: eso es pasto/carpeta, no la bocha
+        if (!(gn - rn > 0.06)) c.muestras.push({ rn, gn });
+      }
+    } catch (e) {}
+    if (c.muestras.length > 40) c.muestras.shift();
+
+    const t = Date.now() - c.inicio;
+    if (c.muestras.length >= 18 && t > 1200) {
+      const ms = c.muestras.slice(-18);
+      const mrn = ms.reduce((a, m) => a + m.rn, 0) / ms.length;
+      const mgn = ms.reduce((a, m) => a + m.gn, 0) / ms.length;
+      const maxDev = Math.max(...ms.map(m => Math.hypot(m.rn - mrn, m.gn - mgn)));
+      if (maxDev < 0.035) { // color estable = hay algo quieto en el círculo
+        _ballColorRef = { rn: mrn, gn: mgn };
+        lastBallPos = { x: vW / 2, y: vH / 2 };
+        lastBallSize = Math.round(r * 0.9);
+        console.log(`[CALIB] ✅ Bocha calibrada: rn=${mrn.toFixed(3)} gn=${mgn.toFixed(3)}`);
+        finCalibracionBocha(true);
+        return;
+      }
+    }
+    // Ayuda si tarda demasiado
+    if (t > 6000 && t % 2000 < 40) {
+      document.getElementById('status-bar').textContent = '🎯 Acercá la bocha al centro del círculo y mantenela quieta';
+    }
+  }
+
   function loop() {
     animFrame = requestAnimationFrame(loop);
 
@@ -3972,6 +4051,12 @@ function startDetectionLoop() {
 
     const vW = videoEl.videoWidth;
     const vH = videoEl.videoHeight;
+
+    // ---- CALIBRACIÓN DE BOCHA: mientras está activa, solo muestreamos ----
+    if (window._calibBocha && window._calibBocha.activa) {
+      _calibStep(vW, vH);
+      return;
+    }
 
     // Run model inference at throttled rate (not every frame) to save battery
     const now = Date.now();
