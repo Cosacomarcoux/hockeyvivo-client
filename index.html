@@ -3863,9 +3863,15 @@ function startDetectionLoop() {
       if (useRfdetr && (modelCanvas.width !== RFDETR_INPUT_SIZE || modelCanvas.height !== RFDETR_INPUT_SIZE)) {
         modelCanvas.width  = RFDETR_INPUT_SIZE;
         modelCanvas.height = RFDETR_INPUT_SIZE;
-      } else if (!useRfdetr && (modelCanvas.width !== 320 || modelCanvas.height !== 240)) {
-        modelCanvas.width  = 320;
-        modelCanvas.height = 240;
+      } else if (!useRfdetr) {
+        // FIX: antes esto forzaba 320×240 SIEMPRE, pisando la configuración
+        // low-end (224×168) que se había elegido para Android de gama baja.
+        const mW = window.IS_LOW_END ? 224 : 320;
+        const mH = window.IS_LOW_END ? 168 : 240;
+        if (modelCanvas.width !== mW || modelCanvas.height !== mH) {
+          modelCanvas.width  = mW;
+          modelCanvas.height = mH;
+        }
       }
 
       const balls = useRfdetr
@@ -3890,6 +3896,66 @@ function startDetectionLoop() {
       console.error('[' + (useRfdetr ? 'RFDETR' : 'COCOSD') + '] ❌ Inference error:', e);
     }
     inferring = false;
+  }
+
+  // ============================================================
+  //  COLOR TRACKER — el fix para Android
+  //  El modelo de IA corre lento en Android (300-1000ms por inferencia), así
+  //  que solo ENCUENTRA la bocha cada tanto. Este tracker la SIGUE por color
+  //  en cada frame (~1-2ms): busca píxeles del color de la bocha en una
+  //  ventana chica alrededor de la última posición conocida.
+  //  Desactivable con sessionStorage.setItem('USE_COLOR_TRACKER','false')
+  // ============================================================
+  const USE_COLOR_TRACKER = sessionStorage.getItem('USE_COLOR_TRACKER') !== 'false';
+  const trackCanvas = document.createElement('canvas');
+  trackCanvas.width = 64; trackCanvas.height = 64;
+  const trackCtx = trackCanvas.getContext('2d', { willReadFrequently: true });
+  let _ballColorRef = null;   // color de la bocha en cromaticidad normalizada {rn, gn}
+
+  // Muestrear el color real de la bocha cada vez que el MODELO la detecta
+  function _sampleBallColor(det) {
+    try {
+      const w = Math.max(6, det.w * 0.5), h = Math.max(6, det.h * 0.5);
+      trackCtx.drawImage(videoEl, det.x - w / 2, det.y - h / 2, w, h, 0, 0, 8, 8);
+      const d = trackCtx.getImageData(0, 0, 8, 8).data;
+      let r = 0, g = 0, b = 0;
+      for (let i = 0; i < 64; i++) { r += d[i*4]; g += d[i*4+1]; b += d[i*4+2]; }
+      const sum = r + g + b;
+      if (sum < 600) return; // muy oscuro: probablemente sombra, no confiar
+      const rn = r / sum, gn = g / sum;
+      // Promedio móvil: se adapta a cambios de luz sin saltos bruscos
+      _ballColorRef = _ballColorRef
+        ? { rn: _ballColorRef.rn * 0.7 + rn * 0.3, gn: _ballColorRef.gn * 0.7 + gn * 0.3 }
+        : { rn, gn };
+    } catch (e) {}
+  }
+
+  // Un paso de tracking: centroid de píxeles que matchean el color de la bocha
+  function _colorTrackStep(vW, vH) {
+    const size = Math.max(140, (lastBallSize || 30) * 5); // ventana de búsqueda
+    const sx = Math.min(Math.max(lastBallPos.x - size / 2, 0), Math.max(0, vW - size));
+    const sy = Math.min(Math.max(lastBallPos.y - size / 2, 0), Math.max(0, vH - size));
+    const TS = 64;
+    try {
+      trackCtx.drawImage(videoEl, sx, sy, size, size, 0, 0, TS, TS);
+      const d = trackCtx.getImageData(0, 0, TS, TS).data;
+      let sumX = 0, sumY = 0, count = 0;
+      for (let i = 0; i < TS * TS; i++) {
+        const r = d[i*4], g = d[i*4+1], b = d[i*4+2];
+        const s = r + g + b;
+        if (s < 90) continue; // demasiado oscuro
+        const dr = r / s - _ballColorRef.rn, dg = g / s - _ballColorRef.gn;
+        if (dr * dr + dg * dg < 0.0022) { sumX += i % TS; sumY += (i / TS) | 0; count++; }
+      }
+      // Muy pocos píxeles = no está; demasiados = el color de referencia es
+      // ambiguo (ej. se muestreó pasto) → no confiar en ninguno de los dos casos
+      if (count < 6 || count > TS * TS * 0.35) return null;
+      const cx = sx + (sumX / count + 0.5) * (size / TS);
+      const cy = sy + (sumY / count + 0.5) * (size / TS);
+      const dx = cx - lastBallPos.x, dy = cy - lastBallPos.y, maxJ = size * 0.45;
+      if (dx * dx + dy * dy > maxJ * maxJ) return null; // salto imposible
+      return { x: cx, y: cy };
+    } catch (e) { return null; }
   }
 
   function loop() {
@@ -3952,8 +4018,31 @@ function startDetectionLoop() {
         y: best.bbox[1] + best.bbox[3] / 2,
         w: best.bbox[2],
         h: best.bbox[3],
-        score: best.score
+        score: best.score,
+        fromModel: true
       };
+      // FIX CLAVE: consumir la detección UNA sola vez. Antes quedaba "pegada"
+      // en lastDetections y se reusaba en cada frame hasta la próxima
+      // inferencia → en Android (inferencia lenta) la bocha parecía congelada
+      // y el historial se llenaba de puntos duplicados con velocidad cero,
+      // arruinando la predicción de trayectoria.
+      lastDetections = [];
+      // Actualizar el color de referencia de la bocha con esta detección real
+      _sampleBallColor(detected);
+    }
+
+    // ---- COLOR TRACKER: entre inferencias del modelo, seguir por color ----
+    // El modelo ENCUENTRA la bocha (cada 1-2s en Android está bien);
+    // esto la SIGUE a 30-60fps con costo de ~1-2ms por frame.
+    if (!detected && USE_COLOR_TRACKER && _ballColorRef && lastBallPos) {
+      const ct = _colorTrackStep(vW, vH);
+      if (ct) {
+        detected = {
+          x: ct.x, y: ct.y,
+          w: lastBallSize || 26, h: lastBallSize || 26,
+          score: 0.45, tracked: true
+        };
+      }
     }
 
     // ---- TRAJECTORY PREDICTION (quadratic — accounts for curve) ----
